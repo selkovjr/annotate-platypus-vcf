@@ -32,6 +32,7 @@ Platypus | TVC | Type | Description
 | | `STB` | Float | Strand bias in variant relative to reference
 | | `STBP` | Float | Pval of strand bias in variant relative to reference
 | | `SXB` | Float | Experimental strand bias based on approximate bayesian score for difference in frequency
+| | `TYPE` | String | The type of allele: SNP, MNP, INS, DEL, or COMPLEX
 
 
 ## Sample annotations (FORMAT + SAMPLE)

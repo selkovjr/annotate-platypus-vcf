@@ -48,18 +48,26 @@ sub parse_params {
 my $opts = parse_params();
 my $vcf_in  = Vcf->new(fh => \*STDIN);
 my $vcf_out = Vcf->new(version => '4.1');
-$vcf_out->add_header_line({
-  key => 'INFO',
-  ID => 'TYPE',
-  Number => 'A',
-  Type => 'String',
-  Description => 'The type of allele: SNP, MNP, INS, DEL, or COMPLEX'
-});
 
 # Convert the header
 $vcf_in->parse_header();
-for (my $i = 1; $i < @{$$vcf_in{header_lines}}; $i++) {
-  $vcf_out->add_header_line($$vcf_in{header_lines}[$i]);
+shift @{$$vcf_in{header_lines}}; # discard format version
+my $info_seen;
+foreach my $line (@{$$vcf_in{header_lines}}) {
+  # Insert definitions for new info tags
+  if ($line->{key} eq 'INFO' and not $info_seen) {
+    $info_seen++;
+    $vcf_out->add_header_line({
+      key => 'INFO',
+      ID => 'TYPE',
+      Number => 'A',
+      Type => 'String',
+      Description => 'The type of allele: SNP, MNP, INS, DEL, or COMPLEX'
+    });
+  }
+
+  # Carry on with the rest of the header
+  $vcf_out->add_header_line($line);
 }
 
 $vcf_out->add_columns(@{$$vcf_in{columns}});

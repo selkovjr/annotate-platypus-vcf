@@ -2,11 +2,14 @@
 
 ## Locus annotations (INFO)
 
+Platypus tags listed here come from a single example of Platipus output. It is
+likely an incomplete set.
+
 Platypus | TVC | Type | Description
 ---------|-----|------|------------
+| | `TYPE` | String | The type of allele: SNP, MNP, INS, DEL, or COMPLEX
 | | `AO` | Integer | Alternate allele observations
 `BRF` | | Float | Fraction of reads around this variant that failed filters
-| | `DP` | Integer | Total read depth at the locus
 | `FS` | | Float | Fisher's exact test for strand bias (Phred score)
 `FR` | | Float | Estimated population frequency of variant
 | | `FR` | String | Reason why the variant was filtered
@@ -32,7 +35,15 @@ Platypus | TVC | Type | Description
 | | `STB` | Float | Strand bias in variant relative to reference
 | | `STBP` | Float | Pval of strand bias in variant relative to reference
 | | `SXB` | Float | Experimental strand bias based on approximate bayesian score for difference in frequency
-| | `TYPE` | String | The type of allele: SNP, MNP, INS, DEL, or COMPLEX
+| `TC` | | Integer | Total coverage at this locus
+| | `DP` | Integer | Total read depth at the locus
+| `TCF` | | Integer | Total forward strand coverage at this locus
+| `TCR` | | Integer | Total reverse strand coverage at this locus
+| `TR` | | Integer | Total number of reads containing this variant
+| | `SAF` | Integer | Alternate allele observations on the forward strand
+| | `SAR` | Integer | Alternate allele observations on the reverse strand
+| | `SRF` | Integer | Number of reference observations on the forward strand
+| | `SRR` | Integer | Number of reference observations on the reverse strand
 
 
 ## Sample annotations (FORMAT + SAMPLE)

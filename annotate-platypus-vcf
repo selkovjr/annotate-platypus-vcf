@@ -1,5 +1,7 @@
 #!/usr/bin/env perl
 
+our $VERSION = 0.1;
+
 use strict;
 use warnings FATAL => qw( all );
 use feature qw/state say/;
@@ -8,18 +10,21 @@ use 5.010;
 use Carp;
 use Data::Dumper;
 
+use IO::File;
 use Vcf;
 use FaSlice;
-use Bio::EnsEMBL::Registry;
-
+use Try::Tiny;
+use AnyEvent::HTTP;
+use JSON::XS qw[ decode_json ];
+use Promises qw[ collect deferred ];
 
 sub usage {
-  say STDERR <<END;
+  say STDERR <<'END';
   About: Convert between VCF versions
   Usage: cat in.vcf | vcf-convert [OPTIONS] > out.vcf
   Options:
-     -r, --refseq <file>    the reference sequence in samtools faindexed fasta file (Not required with SNPs only)
-     -h, -?, --help         his help message
+     -r, --refseq <file>    The reference sequence in samtools faindexed fasta file (not required with SNPs only)
+     -h, -?, --help         This help message
 END
   exit 1;
 }
@@ -45,6 +50,46 @@ sub parse_params {
   return $opts;
 }
 
+
+sub retrieve {
+  my ($uri) = @_;
+  my $d = deferred;
+  http_get $uri => sub {
+    my ($body, $header) = @_;
+    my $data;
+    if ($header->{Status} == 200) {
+      if ($body =~ /<!doctype html>/) {
+        # probably an error
+        $data = {any_covered => undef};
+      }
+      else {
+        try {
+          $body = 'junk';
+          $data = decode_json($body);
+        }
+        catch {
+          say STDERR "$_ in response from $uri";
+
+          my $fh = IO::File->new('bad-response.dump', '>');
+          print $fh Data::Dumper->Dump([$header, $body], [qw(header body)]);
+          close $fh;
+
+          $d->reject();
+        };
+      }
+      say STDERR Dumper($data);
+
+      $d->resolve($data);
+    }
+    else {
+      $d->reject( $body );
+    }
+  };
+
+  return $d->promise;
+}
+
+# -------------------------------- sub main ------------------------------------
 my $opts = parse_params();
 my $vcf_in  = Vcf->new(fh => \*STDIN);
 my $vcf_out = Vcf->new(version => '4.1');
@@ -52,6 +97,7 @@ my $vcf_out = Vcf->new(version => '4.1');
 # Convert the header
 $vcf_in->parse_header();
 shift @{$$vcf_in{header_lines}}; # discard format version
+
 my $info_seen;
 foreach my $line (@{$$vcf_in{header_lines}}) {
   # Insert definitions for new info tags
@@ -64,6 +110,13 @@ foreach my $line (@{$$vcf_in{header_lines}}) {
       Type => 'String',
       Description => 'The type of allele: SNP, MNP, INS, DEL, or COMPLEX'
     });
+    $vcf_out->add_header_line({
+      key => 'INFO',
+      ID => 'ARR',
+      Number => 'A',
+      Type => 'Float',
+      Description => 'ALT to REF per cent ratio'
+    });
   }
 
   # Carry on with the rest of the header
@@ -74,9 +127,11 @@ $vcf_out->add_columns(@{$$vcf_in{columns}});
 print $vcf_out->format_header();
 
 
-# Each data line
+# For each VCF line
 my $fa;
 while (my $x = $vcf_in->next_data_hash()) {
+
+  # Local processing
   # Convert missing (default) FORMAT values
   for my $gt (values %{$$x{gtypes}}) {
     for my $field (@{$$x{FORMAT}}) {
@@ -105,10 +160,14 @@ while (my $x = $vcf_in->next_data_hash()) {
   }
 
   # Parse the ALT column and see if there are indels
+  my @allele;
   my @type;
+  my @arr;
   my $has_indel;
   for my $alt (@{$$x{ALT}}) {
     my ($type, $len, $ht) = $vcf_in->event_type($x, $alt);
+
+    push @allele, "$$x{CHROM}-$$x{POS}-$$x{REF}-$alt";
 
     if ( $type eq 's' ) {
       if ($len == 1) {
@@ -201,21 +260,41 @@ while (my $x = $vcf_in->next_data_hash()) {
 
   # Add new fields
   $$x{INFO}->{TYPE} = join(',', @type);
+
+  # External processing (ExAC)
+  my $transaction = AnyEvent->condvar;
+
+  # Make a separate request for each allele and lump them in a single promise
+  collect (
+    map { # a list of promises
+      retrieve ( "http://exac.hms.harvard.edu/rest/variant/$_" )
+    } @allele
+  )
+  ->then (
+    sub {
+      # send all fulfilled promises to consumer, one for each allele
+      $transaction->send(\@_);
+    },
+    sub { $transaction->croak( 'ERROR' ) }
+  );
+
+  # Block until all of this variant's alleles have been received
+  my $response = $transaction->recv;
+
+  # Gather allele-specific data to insert into INFO
   print $vcf_out->format_line($x);
-}
-__END__
-#my $registry = 'Bio::EnsEMBL::Registry';
-#
-#$registry->load_registry_from_db(
-#  -host => 'ensembldb.ensembl.org',
-#  -user => 'anonymous',
-#);
-#
-#my $variation_adaptor = $registry->get_adaptor(
-#  'human',     # species
-#  'variation', # database type
-#  'variation'  # object type
-#);
-#
-#my $variation = $variation_adaptor->fetch_by_name('rs1333049');
-#print Dumper($variation);
+  foreach my $allele (map {$_->[0]} @$response) {
+    if ($allele->{any_covered} and $allele->{variant}->{variant_id}) {
+      say $allele->{variant}->{variant_id};
+      say sprintf("%7.5f", $allele->{variant}->{allele_freq});
+      say $allele->{variant}->{allele_count};
+      say $allele->{variant}->{allele_num};
+      say join(',', @{$allele->{variant}->{genes}});
+      say join(',', map {$_->{major_consequence}} @{$allele->{variant}->{vep_annotations}});
+    }
+    else {
+    }
+  }
+
+} # next_data_hash()
+

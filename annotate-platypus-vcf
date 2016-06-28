@@ -27,30 +27,29 @@ sub retrieve {
     my ($body, $header) = @_;
     my $data;
     if ($header->{Status} == 200) {
-      if (index($body, '<!doctype html>') >= 0) { # probably an error
-        $data = {any_covered => undef};
-      }
-      else {
-        try {
-          if ($header->{'content-encoding'} and $header->{'content-encoding'} eq 'gzip') {
-            my $buffer;
-            gunzip \$body => \$buffer;
-            $data = decode_json($buffer);
-          }
-          else {
-            $data = decode_json($body);
-          }
+      try {
+        if ($header->{'content-encoding'} and $header->{'content-encoding'} eq 'gzip') {
+          my $buffer;
+          gunzip \$body => \$buffer;
+          $body = $buffer;
         }
-        catch {
-          say STDERR "$_ in response from $uri";
 
-          my $fh = IO::File->new('bad-response.dump', '>');
-          print $fh Data::Dumper->Dump([$header, $body], [qw(header body)]);
-          close $fh;
-
-          $d->reject();
-        };
+        if (index($body, '<!doctype html>') >= 0) { # probably an error
+          $data = {any_covered => undef};
+        }
+        else {
+          $data = decode_json($body);
+        }
       }
+      catch {
+        say STDERR "$_ in response from $uri";
+
+        my $fh = IO::File->new('bad-response.dump', '>');
+        print $fh Data::Dumper->Dump([$header, $body], [qw(header body)]);
+        close $fh;
+
+        $d->reject();
+      };
       #say STDERR Dumper($data);
 
       $d->resolve($data);

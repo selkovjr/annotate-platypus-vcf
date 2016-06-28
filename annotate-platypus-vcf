@@ -1,7 +1,5 @@
 #!/usr/bin/env perl
 
-our $VERSION = 0.1;
-
 use strict;
 use warnings FATAL => qw( all );
 use feature qw/state say/;
@@ -10,7 +8,9 @@ use 5.010;
 use Carp;
 use Data::Dumper;
 
+use File::Basename;
 use IO::File;
+use IO::Uncompress::Gunzip qw[ gunzip ];
 use Vcf;
 use FaSlice;
 use Try::Tiny;
@@ -18,38 +18,7 @@ use AnyEvent::HTTP;
 use JSON::XS qw[ decode_json ];
 use Promises qw[ collect deferred ];
 
-sub usage {
-  say STDERR <<'END';
-  About: Convert between VCF versions
-  Usage: cat in.vcf | vcf-convert [OPTIONS] > out.vcf
-  Options:
-     -r, --refseq <file>    The reference sequence in samtools faindexed fasta file (not required with SNPs only)
-     -h, -?, --help         This help message
-END
-  exit 1;
-}
-
-sub error {
-  my $msg = shift;
-  croak $msg if $msg;
-  usage();
-}
-
-sub parse_params {
-  my $opts = {};
-  while (my $arg = shift(@ARGV)) {
-    if ( $arg eq '-r' || $arg eq '--refseq' ) {
-      $$opts{refseq}=shift(@ARGV);
-      next;
-    }
-
-    usage() if $arg eq '-?' || $arg eq '-h' || $arg eq '--help';
-
-    error("Unknown parameter \"$arg\". Run with -h for help.");
-  }
-  return $opts;
-}
-
+our $VERSION = 0.1;
 
 sub retrieve {
   my ($uri) = @_;
@@ -58,14 +27,19 @@ sub retrieve {
     my ($body, $header) = @_;
     my $data;
     if ($header->{Status} == 200) {
-      if ($body =~ /<!doctype html>/) {
-        # probably an error
+      if (index($body, '<!doctype html>') >= 0) { # probably an error
         $data = {any_covered => undef};
       }
       else {
         try {
-          $body = 'junk';
-          $data = decode_json($body);
+          if ($header->{'content-encoding'} and $header->{'content-encoding'} eq 'gzip') {
+            my $buffer;
+            gunzip \$body => \$buffer;
+            $data = decode_json($buffer);
+          }
+          else {
+            $data = decode_json($body);
+          }
         }
         catch {
           say STDERR "$_ in response from $uri";
@@ -77,7 +51,7 @@ sub retrieve {
           $d->reject();
         };
       }
-      say STDERR Dumper($data);
+      #say STDERR Dumper($data);
 
       $d->resolve($data);
     }
@@ -96,10 +70,10 @@ my $vcf_out = Vcf->new(version => '4.1');
 
 # Convert the header
 $vcf_in->parse_header();
-shift @{$$vcf_in{header_lines}}; # discard format version
+shift @{$vcf_in->{header_lines}}; # discard format version
 
 my $info_seen;
-foreach my $line (@{$$vcf_in{header_lines}}) {
+foreach my $line (@{$vcf_in->{header_lines}}) {
   # Insert definitions for new info tags
   if ($line->{key} eq 'INFO' and not $info_seen) {
     $info_seen++;
@@ -123,7 +97,7 @@ foreach my $line (@{$$vcf_in{header_lines}}) {
   $vcf_out->add_header_line($line);
 }
 
-$vcf_out->add_columns(@{$$vcf_in{columns}});
+$vcf_out->add_columns(@{$vcf_in->{columns}});
 print $vcf_out->format_header();
 
 
@@ -133,27 +107,27 @@ while (my $x = $vcf_in->next_data_hash()) {
 
   # Local processing
   # Convert missing (default) FORMAT values
-  for my $gt (values %{$$x{gtypes}}) {
-    for my $field (@{$$x{FORMAT}}) {
+  for my $gt (values %{$x->{gtypes}}) {
+    for my $field (@{$x->{FORMAT}}) {
       # Skip the GT tag, so that ploidy information is not lost ("./." would become ".")
       next if $field eq 'GT';
 
-      if ( $field eq 'FT' && $$gt{$field} eq $$vcf_in{filter_passed} ) {
-        $$gt{$field} = $$vcf_out{filter_passed};
+      if ( $field eq 'FT' && $gt->{$field} eq $vcf_in->{filter_passed} ) {
+        $gt->{$field} = $vcf_out->{filter_passed};
       }
 
-      if ( exists($$vcf_in{defaults}{$field}) && $$vcf_in{defaults}{$field} eq $$gt{$field} ) {
-        $$gt{$field} = $$vcf_out{defaults}{$field};
+      if ( exists($vcf_in->{defaults}{$field}) && $vcf_in->{defaults}{$field} eq $gt->{$field} ) {
+        $gt->{$field} = $vcf_out->{defaults}{$field};
         next;
       }
 
-      next unless exists($$gt{$field});
+      next unless exists $gt->{$field};
 
       if (
-        exists($$vcf_in{header}{FORMAT}{$field}{default}) &&
-        $$vcf_in{header}{FORMAT}{$field}{default} eq $$gt{$field}
+        exists($vcf_in->{header}{FORMAT}{$field}{default}) &&
+        $vcf_in->{header}{FORMAT}{$field}{default} eq $gt->{$field}
       ) {
-        delete $$gt{$field};
+        delete $gt->{$field};
         next;
       }
     }
@@ -164,17 +138,17 @@ while (my $x = $vcf_in->next_data_hash()) {
   my @type;
   my @arr;
   my $has_indel;
-  for my $alt (@{$$x{ALT}}) {
+  for my $alt (@{$x->{ALT}}) {
     my ($type, $len, $ht) = $vcf_in->event_type($x, $alt);
 
-    push @allele, "$$x{CHROM}-$$x{POS}-$$x{REF}-$alt";
+    push @allele, "$x->{CHROM}-$x->{POS}-$x->{REF}-$alt";
 
     if ( $type eq 's' ) {
       if ($len == 1) {
         push @type, 'SNP';
       }
       else {
-        if (length $$x{REF} == length $alt and length $alt == $len) {
+        if (length $x->{REF} == length $alt and length $alt == $len) {
           push @type, 'MNP';
         }
         else {
@@ -190,7 +164,7 @@ while (my $x = $vcf_in->next_data_hash()) {
     }
 
     if ( $type ne 'i' ) {
-      error("FIXME: expected indel at $$x{CHROM}:$$x{POS}");
+      error("FIXME: expected indel at $x->{CHROM}:$x->{POS}");
     }
 
     if ($len > 0) {
@@ -208,11 +182,11 @@ while (my $x = $vcf_in->next_data_hash()) {
     my $map = {};
     my $alt_to_mapref = {};
 
-    for my $alt (@{$$x{ALT}}) {
+    for my $alt (@{$x->{ALT}}) {
       my ($type, $len, $ht) = $vcf_in->event_type($x, $alt);
       if ( $type eq 's' or $type eq 'r' ) {
-        $$alt_to_mapref{$alt} = {ref => $$x{REF}, alt => $alt};
-        $$map{$$x{REF}}{$alt} = 1;
+        $alt_to_mapref->{$alt} = {ref => $x->{REF}, alt => $alt};
+        $map->{$x->{REF}}{$alt} = 1;
         next;
       }
 
@@ -224,10 +198,8 @@ while (my $x = $vcf_in->next_data_hash()) {
       }
       elsif ( $type eq 'i' && $len < 0 ) {
         unless ( $fa ) {
-          if ( !$$opts{refseq} ) {
-            error("Indels present, missing the -r option.");
-          }
-          $fa = FaSlice->new(file => $$opts{refseq}, size => 1_000_000);
+          error("Indels present, missing the -r option.") unless $opts->{refseq};
+          $fa = FaSlice->new(file => $opts->{refseq}, size => 1_000_000);
         }
         my $ref   = $fa->get_slice($$x{CHROM}, $$x{POS}, $$x{POS} + abs($len));
         my $nref1 = uc(substr($ref, 0, 1));
@@ -282,7 +254,6 @@ while (my $x = $vcf_in->next_data_hash()) {
   my $response = $transaction->recv;
 
   # Gather allele-specific data to insert into INFO
-  print $vcf_out->format_line($x);
   foreach my $allele (map {$_->[0]} @$response) {
     if ($allele->{any_covered} and $allele->{variant}->{variant_id}) {
       say $allele->{variant}->{variant_id};
@@ -295,6 +266,50 @@ while (my $x = $vcf_in->next_data_hash()) {
     else {
     }
   }
+  print $vcf_out->format_line($x);
 
 } # next_data_hash()
+
+sub usage {
+  my $name = basename $0;
+
+  say STDERR <<"END";
+  $name v$VERSION: add variation type and depth annotations; add consequence predictions from ExAC
+
+  Usage: cat in.vcf | $name [OPTIONS] > out.vcf
+  Options:
+     -r, --refseq <file>    The reference sequence in samtools faindexed fasta file (not required with SNPs only)
+     -h, -?, --help         This help message
+END
+
+  return 1;
+}
+
+sub error {
+  my $msg = shift;
+  croak $msg if $msg;
+  usage();
+  exit 1;
+}
+
+sub parse_params {
+  my $o = {};
+  while (my $arg = shift @ARGV) {
+    if ( $arg eq '-r' || $arg eq '--refseq' ) {
+      $o->{refseq} = shift @ARGV;
+      next;
+    }
+
+    if ($arg eq '-?' or $arg eq '-h' or $arg eq '--help') {
+      usage();
+      exit 1;
+    }
+
+    error("Unknown parameter \"$arg\". Run with -h for help.");
+  }
+
+  return $o;
+}
+
+
 

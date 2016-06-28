@@ -1,10 +1,11 @@
 #!/usr/bin/env perl
 
 use strict;
-use warnings FATAL => qw( all );
-use feature qw/state say/;
+use warnings FATAL => qw[ all ];
+use feature qw[ state say ];
 use 5.010;
 
+use English '-no_match_vars';
 use Carp;
 use Data::Dumper;
 
@@ -19,48 +20,6 @@ use JSON::XS qw[ decode_json ];
 use Promises qw[ collect deferred ];
 
 our $VERSION = 0.1;
-
-sub retrieve {
-  my ($uri) = @_;
-  my $d = deferred;
-  http_get $uri => sub {
-    my ($body, $header) = @_;
-    my $data;
-    if ($header->{Status} == 200) {
-      try {
-        if ($header->{'content-encoding'} and $header->{'content-encoding'} eq 'gzip') {
-          my $buffer;
-          gunzip \$body => \$buffer;
-          $body = $buffer;
-        }
-
-        if (index($body, '<!doctype html>') >= 0) { # probably an error
-          $data = {any_covered => undef};
-        }
-        else {
-          $data = decode_json($body);
-        }
-      }
-      catch {
-        say STDERR "$_ in response from $uri";
-
-        my $fh = IO::File->new('bad-response.dump', '>');
-        print $fh Data::Dumper->Dump([$header, $body], [qw(header body)]);
-        close $fh;
-
-        $d->reject();
-      };
-      #say STDERR Dumper($data);
-
-      $d->resolve($data);
-    }
-    else {
-      $d->reject( $body );
-    }
-  };
-
-  return $d->promise;
-}
 
 # -------------------------------- sub main ------------------------------------
 my $opts = parse_params();
@@ -111,23 +70,21 @@ while (my $x = $vcf_in->next_data_hash()) {
       # Skip the GT tag, so that ploidy information is not lost ("./." would become ".")
       next if $field eq 'GT';
 
-      if ( $field eq 'FT' && $gt->{$field} eq $vcf_in->{filter_passed} ) {
+      if ( $field eq 'FT' and $gt->{$field} eq $vcf_in->{filter_passed} ) {
         $gt->{$field} = $vcf_out->{filter_passed};
       }
 
-      if ( exists($vcf_in->{defaults}{$field}) && $vcf_in->{defaults}{$field} eq $gt->{$field} ) {
+      if ( exists $vcf_in->{defaults}{$field} and $vcf_in->{defaults}{$field} eq $gt->{$field} ) {
         $gt->{$field} = $vcf_out->{defaults}{$field};
         next;
       }
 
-      next unless exists $gt->{$field};
-
       if (
-        exists($vcf_in->{header}{FORMAT}{$field}{default}) &&
+        exists $gt->{$field} and
+        exists $vcf_in->{header}{FORMAT}{$field}{default} and
         $vcf_in->{header}{FORMAT}{$field}{default} eq $gt->{$field}
       ) {
         delete $gt->{$field};
-        next;
       }
     }
   }
@@ -189,48 +146,52 @@ while (my $x = $vcf_in->next_data_hash()) {
         next;
       }
 
-      if ( $type eq 'i' && $len > 0 ) {
-        my $tmp = $$x{REF}.$ht;
-        $$alt_to_mapref{$alt} = {ref => $$x{REF}, alt => $tmp};
-        $$map{$$x{REF}}{$tmp} = 1;
+      if ( $type eq 'i' and $len > 0 ) {
+        my $tmp = $x->{REF}.$ht;
+        $alt_to_mapref->{$alt} = {ref => $x->{REF}, alt => $tmp};
+        $map->{$x->{REF}}{$tmp} = 1;
         next;
       }
-      elsif ( $type eq 'i' && $len < 0 ) {
-        unless ( $fa ) {
-          error("Indels present, missing the -r option.") unless $opts->{refseq};
+      elsif ( $type eq 'i' and $len < 0 ) {
+        if ( not $fa ) {
+          if ( not $opts->{refseq} ) {
+            error('Indels present, missing the -r option.');
+          }
           $fa = FaSlice->new(file => $opts->{refseq}, size => 1_000_000);
         }
-        my $ref   = $fa->get_slice($$x{CHROM}, $$x{POS}, $$x{POS} + abs($len));
-        my $nref1 = uc(substr($ref, 0, 1));
-        my $oref1 = uc(substr($$x{REF}, 0, 1));
+        my $ref   = $fa->get_slice($x->{CHROM}, $x->{POS}, $x->{POS} + abs $len);
+        my $nref1 = uc substr $ref, 0, 1;
+        my $oref1 = uc substr $x->{REF}, 0, 1;
 
         # Sanity check
         if ( $oref1 ne $nref1 ) {
-          error("Sanity check failed: the ref does not agree at $$x{CHROM}:$$x{POS} .. [$nref1] in .fa,  [$oref1] in .vcf");
+          error("Sanity check failed: the ref does not agree at $x->{CHROM}:$x->{POS} .. [$nref1] in .fa,  [$oref1] in .vcf");
         }
 
-        $$alt_to_mapref{$alt} = { ref => $ref, alt => $nref1 };
-        $$map{$ref}{$nref1} = 1;
+        $alt_to_mapref->{$alt} = { ref => $ref, alt => $nref1 };
+        $map->{$ref}{$nref1} = 1;
         next;
       }
       else {
-        error("Uh, FIXME: $$x{CHROM}:$$x{POS} [$type] [$len] [$ht]");
+        error("Uh, FIXME: $x->{CHROM}:$x->{POS} [$type] [$len] [$ht]");
       }
     }
 
-    $$x{REF} = $vcf_out->fill_ref_alt_mapping($map);
-    error("Failed on line $$x{CHROM}:$$x{POS}") unless defined $$x{REF};
+    $x->{REF} = $vcf_out->fill_ref_alt_mapping($map);
+    if (not defined $x->{REF}) {
+      error("Failed on line $x->{CHROM}:$x->{POS}");
+    }
 
-    for (my $i = 0; $i < @{$$x{ALT}}; $i++) {
-      my $ori_ref = $$alt_to_mapref{$$x{ALT}[$i]}{ref};
-      my $ori_alt = $$alt_to_mapref{$$x{ALT}[$i]}{alt};
-      $$x{ALT}[$i] = $$map{$ori_ref}{$ori_alt};
+    for my $i (0 .. @{$x->{ALT}} - 1) {
+      my $ori_ref = $alt_to_mapref->{$x->{ALT}[$i]}{ref};
+      my $ori_alt = $alt_to_mapref->{$x->{ALT}[$i]}{alt};
+      $x->{ALT}[$i] = $map->{$ori_ref}{$ori_alt};
     }
 
   } # has indel
 
   # Add new fields
-  $$x{INFO}->{TYPE} = join(',', @type);
+  $x->{INFO}->{TYPE} = join ',', @type;
 
   # External processing (ExAC)
   my $transaction = AnyEvent->condvar;
@@ -256,11 +217,11 @@ while (my $x = $vcf_in->next_data_hash()) {
   foreach my $allele (map {$_->[0]} @$response) {
     if ($allele->{any_covered} and $allele->{variant}->{variant_id}) {
       say $allele->{variant}->{variant_id};
-      say sprintf("%7.5f", $allele->{variant}->{allele_freq});
+      say sprintf '%7.5f', $allele->{variant}->{allele_freq};
       say $allele->{variant}->{allele_count};
       say $allele->{variant}->{allele_num};
-      say join(',', @{$allele->{variant}->{genes}});
-      say join(',', map {$_->{major_consequence}} @{$allele->{variant}->{vep_annotations}});
+      say join ',', @{$allele->{variant}->{genes}};
+      say join ',', map {$_->{major_consequence}} @{$allele->{variant}->{vep_annotations}};
     }
     else {
     }
@@ -269,13 +230,55 @@ while (my $x = $vcf_in->next_data_hash()) {
 
 } # next_data_hash()
 
+sub retrieve {
+  my ($uri) = @_;
+  my $d = deferred;
+  http_get $uri => sub {
+    my ($body, $header) = @_;
+    my $data;
+    if ($header->{Status} == 200) {
+      try {
+        if ($header->{'content-encoding'} and $header->{'content-encoding'} eq 'gzip') {
+          my $buffer;
+          gunzip \$body => \$buffer;
+          $body = $buffer;
+        }
+
+        if (index($body, '<!doctype html>') >= 0) { # probably an error
+          $data = {any_covered => undef};
+        }
+        else {
+          $data = decode_json($body);
+        }
+      }
+      catch {
+        say {*STDERR} "$_ in response from $uri";
+
+        my $fh = IO::File->new('bad-response.dump', '>');
+        print {$fh} Data::Dumper->Dump([$header, $body], [qw(header body)]);
+        close {$fh};
+
+        $d->reject();
+      };
+      #say STDERR Dumper($data);
+
+      $d->resolve($data);
+    }
+    else {
+      $d->reject( $body );
+    }
+  };
+
+  return $d->promise;
+}
+
 sub usage {
-  my $name = basename $0;
+  my $self = basename $PROGRAM_NAME;
 
-  say STDERR <<"END";
-  $name v$VERSION: add variation type and depth annotations; add consequence predictions from ExAC
+  say {*STDERR} <<"END";
+  $self v$VERSION: add variation type and depth annotations; add consequence predictions from ExAC
 
-  Usage: cat in.vcf | $name [OPTIONS] > out.vcf
+  Usage: cat in.vcf | $self [OPTIONS] > out.vcf
   Options:
      -r, --refseq <file>    The reference sequence in samtools faindexed fasta file (not required with SNPs only)
      -h, -?, --help         This help message
@@ -294,7 +297,7 @@ sub error {
 sub parse_params {
   my $o = {};
   while (my $arg = shift @ARGV) {
-    if ( $arg eq '-r' || $arg eq '--refseq' ) {
+    if ( $arg eq '-r' or $arg eq '--refseq' ) {
       $o->{refseq} = shift @ARGV;
       next;
     }

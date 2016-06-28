@@ -1,10 +1,8 @@
-##fileformat=VCFv4.1
+##fileformat=VCFv4.0
 ##fileDate=2016-06-21
 ##source=Platypus_Version_0.8.1
 ##platypusOptions={'assemblyRegionSize': 1500, 'trimReadFlank': 0, 'assembleBadReads': 1, 'bamFiles': ['/data/TCGA-A2-A0YC/tumor.bam'], 'minVarDist': 9, 'trimSoftClipped': 1, 'minReads': 2, 'qualBinSize': 1, 'refFile': '/data/ref_genome/human_g1k_v37.fasta', 'maxHaplotypes': 50, 'filterVarsByCoverage': 1, 'maxSize': 1500, 'originalMaxHaplotypes': 50, 'skipDifficultWindows': 0, 'parseNCBI': 0, 'skipRegionsFile': None, 'noCycles': 0, 'trimAdapter': 1, 'minPosterior': 5, 'assembleAll': 1, 'trimOverlapping': 1, 'filterDuplicates': 1, 'abThreshold': 0.001, 'minFlank': 10, 'bufferSize': 100000, 'fileCaching': 0, 'useEMLikelihoods': 0, 'coverageSamplingLevel': 30, 'calculateFlankScore': 0, 'logFileName': 'log.txt', 'nCPU': 1, 'filterReadsWithUnmappedMates': 1, 'qdThreshold': 10, 'maxVariants': 8, 'scThreshold': 0.95, 'filterReadsWithDistantMates': 1, 'maxReads': 5000000, 'badReadsWindow': 11, 'genIndels': 1, 'largeWindows': 0, 'minMapQual': 20, 'maxVarDist': 15, 'maxGOF': 30, 'rlen': 150, 'minGoodQualBases': 20, 'refCallBlockSize': 1000, 'countOnlyExactIndelMatches': 0, 'longHaps': 0, 'HLATyping': 0, 'filterReadPairsWithSmallInserts': 1, 'minBaseQual': 20, 'getVariantsFromBAMs': 1, 'genSNPs': 1, 'assemble': 0, 'assemblerKmerSize': 15, 'minVarFreq': 0.05, 'alignScoreFile': '', 'verbosity': 2, 'sourceFile': None, 'compressReads': 0, 'rmsmqThreshold': 40, 'filteredReadsFrac': 0.7, 'outputRefCalls': 0, 'badReadsThreshold': 15, 'hapScoreThreshold': 4, 'regions': None, 'sbThreshold': 0.001, 'output': '/data/TCGA-A2-A0YC/platypus_out.vcf', 'assembleBrokenPairs': 0, 'mergeClusteredVariants': 1, 'maxGenotypes': 1275, 'nInd': 1}
 ##filter="MQ > 50 & TC > 100 & QUAL > 2900"
-##INFO=<ID=TYPE,Number=A,Type=String,Description="The type of allele: SNP, MNP, INS, DEL, or COMPLEX">
-##INFO=<ID=ARR,Number=A,Type=Float,Description="ALT to REF per cent ratio">
 ##INFO=<ID=FR,Number=.,Type=Float,Description="Estimated population frequency of variant">
 ##INFO=<ID=MMLQ,Number=1,Type=Float,Description="Median minimum base quality for bases around variant">
 ##INFO=<ID=TCR,Number=1,Type=Integer,Description="Total reverse strand coverage at this locus">
@@ -49,11 +47,5 @@
 ##FORMAT=<ID=GL,Number=.,Type=Float,Description="Genotype log10-likelihoods for AA,AB and BB genotypes, where A = ref and B = variant. Only applicable for bi-allelic sites">
 ##FORMAT=<ID=NV,Number=.,Type=Integer,Description="Number of reads containing variant in this sample">
 #CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	H_LS-A2-A0YC-01A-11D-A117-09
-1-181548341-A-G
-0.10697
-12809
-119748
-ENSG00000198216
-synonymous_variant,synonymous_variant,synonymous_variant,synonymous_variant,synonymous_variant,synonymous_variant,synonymous_variant,5_prime_UTR_variant,non_coding_transcript_exon_variant
-1	181548341	.	A	G	2962	PASS	BRF=0.26;FR=0.5000;HP=1;HapScore=1;MGOF=2;MMLQ=37;MQ=59.9;NF=26;NR=84;PP=2962;QD=20;SC=TACATCGAGCATGCTTCATGA;SbPval=0.52;Source=Platypus;TC=263;TCF=62;TCR=201;TR=110;TYPE=SNP;WE=181548349;WS=181548331	GT:GL:GOF:GQ:NR:NV	0/1:-300.0,0.0,-300.0:2:99:263:110
-1	181719679	.	C	T	2962	PASS	BRF=0.13;FR=0.5000;HP=2;HapScore=1;MGOF=1;MMLQ=35;MQ=60.0;NF=36;NR=81;PP=2962;QD=20;SC=GTTGGAGGAGCGAGAAAGTAT;SbPval=0.54;Source=Platypus;TC=193;TCF=60;TCR=133;TR=117;TYPE=SNP;WE=181719687;WS=181719669	GT:GL:GOF:GQ:NR:NV	0/1:-300.0,0.0,-199.3:1:99:193:117
+22	45789642	.	A	C	2965	PASS	BRF=0.23;FR=1.0000;HP=2;HapScore=1;MGOF=2;MMLQ=36;MQ=59.93;NF=70;NR=127;PP=2965;QD=20;SC=TCTTCATTAAATTCAGACATT;SbPval=0.51;Source=Platypus;TC=199;TCF=70;TCR=129;TR=197;WE=45789650;WS=45789632	GT:GL:GOF:GQ:NR:NV	1/1:-300.0,-56.89,0.0:2:99:199:197
+GL000192.1	160087	.	C	T	2965	PASS	BRF=0.16;FR=1.0000;HP=1;HapScore=1;MGOF=1;MMLQ=33;MQ=51.85;NF=54;NR=52;PP=2965;QD=20;SC=CGCTCCGCCTCCTCCCTCTCC;SbPval=0.48;Source=Platypus;TC=110;TCF=54;TCR=56;TR=106;WE=160095;WS=160077	GT:GL:GOF:GQ:NR:NV	1/1:-300.0,-30.91,0.0:1:99:110:106

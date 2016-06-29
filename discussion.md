@@ -44,11 +44,18 @@ there are multiple possibilities, annotate with the most deleterious possibility
 4. **Percentage of reads supporting the variant versus those supporting reference reads.**
 
    The only interpetation I imagine fitting this description is both ratios
-   displayed in the same tag. If 'versus' means ratio, it can be infinite, and
+   displayed in the same tag. If _versus_ means ratio, it can be infinite, and
    how does one measure percent infinity?
 
-5. Allele frequency of variant from Broad Institute ExAC Project API (API documentation is available here: http://exac.hms.harvard.edu/)
+   Pending clarification, the solution is to insert an INFO tag `ARF`
+   (Alternate-Reference percent Frequencies):
+   ```
+   ARF=98.995:1.005
+   ```
+   In the case of multi-allelic variants, this will be a comma-separated list of pairs.
 
-6. Additional optional information from ExAC that you feel might be relevant
+5. **Allele frequency of variant from Broad Institute ExAC Project API (API documentation is available here: http://exac.hms.harvard.edu/)**
+
+6. **Additional optional information from ExAC that you feel might be relevant**
 
 

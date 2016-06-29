@@ -47,9 +47,14 @@
 <h2 id="annotations">Annotations</h2>
 <p>All annotations are added as new tags in the INFO column, including:</p>
 <ul>
-<li><code>TYPE=SNP|MNP|INS|DEL|COMPLEX|MATCH</code></li>
-<li><code>CONS=SNP|MNP|INS|DEL|COMPLEX|MATCH</code></li>
+<li>Variant type: <code>TYPE=SNP|MNP|INS|DEL|COMPLEX|MATCH</code></li>
+<li>Allele frequency: <code>AF=[0.0..1.0]</code></li>
+<li>Alt-Ref percent frequencies: <code>ARF=[0.0..100.0]:[0.0..100.0]</code></li>
+<li>Variant effect prediction: <code>VEP=...</code></li>
 </ul>
+<p>The annotations of multiallelic variants are represented as comma-separated
+lists, <em>e.g.</em>, <code>AF=0.07306,;</code> (The first allele’s frequency is 0.07306; data
+not available for the second).</p>
 
             </div>
             
@@ -71,6 +76,7 @@
 <span class="hljs-keyword">use</span> AnyEvent::HTTP;
 <span class="hljs-keyword">use</span> JSON::XS <span class="hljs-string">qw[ decode_json ]</span>;
 <span class="hljs-keyword">use</span> Promises <span class="hljs-string">qw[ collect deferred ]</span>;
+<span class="hljs-keyword">use</span> List::MoreUtils <span class="hljs-string">qw[ firstidx ]</span>;
 
 <span class="hljs-keyword">our</span> $VERSION = <span class="hljs-number">0</span>.<span class="hljs-number">1</span>;
 
@@ -286,11 +292,9 @@ to find the minimal reference segment containing all variants.</p>
               <div class="pilwrap ">
                 <a class="pilcrow" href="#section-13">&#182;</a>
               </div>
-              <p><strong>Fetch consequence predictions from ExAC</strong></p>
+              <p><strong>Fetch predictions and population data from ExAC</strong></p>
 
             </div>
-            
-            <div class="content"><div class='highlight'><pre>  <span class="hljs-keyword">my</span> $transaction = AnyEvent-&gt;condvar;</pre></div></div>
             
         </li>
         
@@ -301,15 +305,12 @@ to find the minimal reference segment containing all variants.</p>
               <div class="pilwrap ">
                 <a class="pilcrow" href="#section-14">&#182;</a>
               </div>
-              <p>Make a separate request for each allele and lump them in a single promise</p>
+              <p>Use a state varible to wrap multiallelic requests in a single
+transaction.</p>
 
             </div>
             
-            <div class="content"><div class='highlight'><pre>  collect (
-    <span class="hljs-keyword">map</span> { <span class="hljs-comment"># make a list of promises</span>
-      retrieve ( <span class="hljs-string">"http://exac.hms.harvard.edu/rest/variant/$_"</span> )
-    } @{$var_info-&gt;{allele}}
-  )-&gt;then (</pre></div></div>
+            <div class="content"><div class='highlight'><pre>  <span class="hljs-keyword">my</span> $transaction = AnyEvent-&gt;condvar;</pre></div></div>
             
         </li>
         
@@ -320,7 +321,26 @@ to find the minimal reference segment containing all variants.</p>
               <div class="pilwrap ">
                 <a class="pilcrow" href="#section-15">&#182;</a>
               </div>
-              <p>send all fulfilled promises to consumer</p>
+              <p>Make a separate request for each allele and lump them in a single promise</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>  collect (
+    <span class="hljs-keyword">map</span> { <span class="hljs-comment"># make a list of promises</span>
+      retrieve ( <span class="hljs-string">"http://exac.hms.harvard.edu/rest/variant"</span>, $_ )
+    } @{$var_info-&gt;{allele}}
+  )-&gt;then (</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-16">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-16">&#182;</a>
+              </div>
+              <p>Send all fulfilled promises to consumer</p>
 
             </div>
             
@@ -334,23 +354,39 @@ to find the minimal reference segment containing all variants.</p>
         </li>
         
         
-        <li id="section-16">
+        <li id="section-17">
             <div class="annotation">
               
               <div class="pilwrap ">
-                <a class="pilcrow" href="#section-16">&#182;</a>
+                <a class="pilcrow" href="#section-17">&#182;</a>
               </div>
               <p>Block until all of this variant’s allele-specific requests have received a
-response. Extract allele data from each response and hang it on to
+response. Responses can come out of order, so storing them as a hash allows
+order reconstruction from <code>(@{$var_info-&gt;{allele}}</code>.</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>  <span class="hljs-keyword">my</span> %response = <span class="hljs-keyword">map</span> {$_-&gt;[<span class="hljs-number">0</span>]-&gt;{key}, $_-&gt;[<span class="hljs-number">0</span>]} @{$transaction-&gt;<span class="hljs-keyword">recv</span>};</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-18">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-18">&#182;</a>
+              </div>
+              <p>Extract allele data from each response and hang it on to
 <code>$var_info</code> produced by initial variant classification.</p>
 
             </div>
             
-            <div class="content"><div class='highlight'><pre>  <span class="hljs-keyword">my</span> $responses = $transaction-&gt;<span class="hljs-keyword">recv</span>;
-  <span class="hljs-keyword">foreach</span> <span class="hljs-keyword">my</span> $allele ( <span class="hljs-keyword">map</span> {$_-&gt;[<span class="hljs-number">0</span>]} @{$responses} ) {
-    <span class="hljs-keyword">if</span> ( $allele-&gt;{any_covered} <span class="hljs-keyword">and</span> $allele-&gt;{variant}-&gt;{variant_id} ) {
-      <span class="hljs-keyword">say</span> $allele-&gt;{variant}-&gt;{variant_id};
+            <div class="content"><div class='highlight'><pre>  <span class="hljs-keyword">foreach</span> <span class="hljs-keyword">my</span> $variant_id (@{$var_info-&gt;{allele}}) { <span class="hljs-comment"># in order</span>
+    <span class="hljs-keyword">my</span> $allele = $response{$variant_id};
+    <span class="hljs-keyword">if</span> ( $allele-&gt;{any_covered} <span class="hljs-keyword">and</span> <span class="hljs-keyword">exists</span> $allele-&gt;{variant}-&gt;{allele_freq}) {
       <span class="hljs-keyword">push</span> @{$var_info-&gt;{allele_freq}}, <span class="hljs-keyword">sprintf</span> <span class="hljs-string">'%7.5f'</span>, $allele-&gt;{variant}-&gt;{allele_freq};  <span class="hljs-comment">### 2 ###</span>
+      <span class="hljs-keyword">say</span> $allele-&gt;{variant}-&gt;{variant_id};
 
       <span class="hljs-keyword">say</span> $allele-&gt;{variant}-&gt;{allele_count};
       <span class="hljs-keyword">say</span> $allele-&gt;{variant}-&gt;{allele_num};
@@ -358,17 +394,18 @@ response. Extract allele data from each response and hang it on to
       <span class="hljs-keyword">say</span> <span class="hljs-keyword">join</span> <span class="hljs-string">q{,}</span>, <span class="hljs-keyword">map</span> {$_-&gt;{major_consequence}} @{$allele-&gt;{variant}-&gt;{vep_annotations}};
     }
     <span class="hljs-keyword">else</span> {
+      <span class="hljs-keyword">push</span> @{$var_info-&gt;{allele_freq}}, <span class="hljs-string">''</span>;  <span class="hljs-comment">### 2 ###</span>
     }
   }</pre></div></div>
             
         </li>
         
         
-        <li id="section-17">
+        <li id="section-19">
             <div class="annotation">
               
               <div class="pilwrap ">
-                <a class="pilcrow" href="#section-17">&#182;</a>
+                <a class="pilcrow" href="#section-19">&#182;</a>
               </div>
               <p><strong>Add annotations and write the augmented variant</strong></p>
 
@@ -383,9 +420,22 @@ response. Extract allele data from each response and hang it on to
     <span class="hljs-keyword">my</span> $percent_ref = <span class="hljs-keyword">sprintf</span> <span class="hljs-string">"%5.3f"</span>, <span class="hljs-number">100.0</span> * ($total_cov - $alt_cov) / $total_cov;
     <span class="hljs-keyword">push</span> @ratio, <span class="hljs-string">"$percent_alt:$percent_ref"</span>;
   }
-  $x-&gt;{INFO}-&gt;{ARF} = <span class="hljs-keyword">join</span> <span class="hljs-string">q{,}</span>, @ratio;  <span class="hljs-comment">### 4 ###</span>
+  $x-&gt;{INFO}-&gt;{ARF} = <span class="hljs-keyword">join</span> <span class="hljs-string">q{,}</span>, @ratio;  <span class="hljs-comment">### 4 ###</span></pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-20">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-20">&#182;</a>
+              </div>
+              <p>Check that the array of allele frequencies has a non-null value</p>
 
-  <span class="hljs-keyword">if</span> (<span class="hljs-keyword">exists</span> $var_info-&gt;{allele_freq}) {
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>  <span class="hljs-keyword">if</span> (<span class="hljs-keyword">grep</span> {$_} @{$var_info-&gt;{allele_freq}}) {
     $x-&gt;{INFO}-&gt;{AF} = <span class="hljs-keyword">join</span> <span class="hljs-string">q{,}</span>, @{$var_info-&gt;{allele_freq}};
   }
 
@@ -396,11 +446,11 @@ response. Extract allele data from each response and hang it on to
         </li>
         
         
-        <li id="section-18">
+        <li id="section-21">
             <div class="annotation">
               
               <div class="pilwrap ">
-                <a class="pilcrow" href="#section-18">&#182;</a>
+                <a class="pilcrow" href="#section-21">&#182;</a>
               </div>
               <hr>
 <h3 id="functions">Functions</h3>
@@ -410,11 +460,11 @@ response. Extract allele data from each response and hang it on to
         </li>
         
         
-        <li id="section-19">
+        <li id="section-22">
             <div class="annotation">
               
               <div class="pilwrap ">
-                <a class="pilcrow" href="#section-19">&#182;</a>
+                <a class="pilcrow" href="#section-22">&#182;</a>
               </div>
               <p><strong>fill_genottype_defaults($var)</strong></p>
 <p>Add default FORMAT values not present in the input VCF</p>
@@ -427,11 +477,11 @@ response. Extract allele data from each response and hang it on to
         </li>
         
         
-        <li id="section-20">
+        <li id="section-23">
             <div class="annotation">
               
               <div class="pilwrap ">
-                <a class="pilcrow" href="#section-20">&#182;</a>
+                <a class="pilcrow" href="#section-23">&#182;</a>
               </div>
               <p>This function’s body was copied from
 <a href="https://github.com/vcftools/vcftools/blob/master/src/perl/vcf-convert">vcf-convert</a>.</p>
@@ -444,11 +494,11 @@ response. Extract allele data from each response and hang it on to
         </li>
         
         
-        <li id="section-21">
+        <li id="section-24">
             <div class="annotation">
               
               <div class="pilwrap ">
-                <a class="pilcrow" href="#section-21">&#182;</a>
+                <a class="pilcrow" href="#section-24">&#182;</a>
               </div>
               <p>Skip the GT tag, so that ploidy information is not lost (<code>./.</code> would become <code>.</code>)</p>
 
@@ -484,11 +534,11 @@ response. Extract allele data from each response and hang it on to
         </li>
         
         
-        <li id="section-22">
+        <li id="section-25">
             <div class="annotation">
               
               <div class="pilwrap ">
-                <a class="pilcrow" href="#section-22">&#182;</a>
+                <a class="pilcrow" href="#section-25">&#182;</a>
               </div>
               <hr>
 <p><strong>classify_variant($var)</strong></p>
@@ -508,11 +558,11 @@ ExAC queries) and variant types as arrays.</p>
         </li>
         
         
-        <li id="section-23">
+        <li id="section-26">
             <div class="annotation">
               
               <div class="pilwrap ">
-                <a class="pilcrow" href="#section-23">&#182;</a>
+                <a class="pilcrow" href="#section-26">&#182;</a>
               </div>
               <p>This function’s body is derived from
 <a href="https://github.com/vcftools/vcftools/blob/master/src/perl/vcf-convert">vcf-convert</a>.</p>
@@ -565,11 +615,11 @@ ExAC queries) and variant types as arrays.</p>
         </li>
         
         
-        <li id="section-24">
+        <li id="section-27">
             <div class="annotation">
               
               <div class="pilwrap ">
-                <a class="pilcrow" href="#section-24">&#182;</a>
+                <a class="pilcrow" href="#section-27">&#182;</a>
               </div>
               <hr>
 <p><strong>indel_maps($var, $input_vcf)</strong> -&gt; $map, $alt_to_mapref</p>
@@ -635,11 +685,11 @@ $alt_to_mapref = {
         </li>
         
         
-        <li id="section-25">
+        <li id="section-28">
             <div class="annotation">
               
               <div class="pilwrap ">
-                <a class="pilcrow" href="#section-25">&#182;</a>
+                <a class="pilcrow" href="#section-28">&#182;</a>
               </div>
               <hr>
 <p><strong>retrieve($uri)</strong></p>
@@ -649,9 +699,10 @@ JSON response.</p>
             </div>
             
             <div class="content"><div class='highlight'><pre><span class="hljs-function"><span class="hljs-keyword">sub</span> <span class="hljs-title">retrieve</span> </span>{
-  <span class="hljs-keyword">my</span> ($uri) = @_;
+  <span class="hljs-keyword">my</span> ($api_uri, $key) = @_;
   <span class="hljs-keyword">my</span> $d = deferred;
-  http_get $uri =&gt; <span class="hljs-function"><span class="hljs-keyword">sub</span> </span>{
+
+  http_get <span class="hljs-string">"$api_uri/$key"</span> =&gt; <span class="hljs-function"><span class="hljs-keyword">sub</span> </span>{
     <span class="hljs-keyword">my</span> ($body, $header) = @_;
     <span class="hljs-keyword">my</span> $data;
     <span class="hljs-keyword">if</span> ($header-&gt;{Status} == SUCCESS) {</pre></div></div>
@@ -659,11 +710,11 @@ JSON response.</p>
         </li>
         
         
-        <li id="section-26">
+        <li id="section-29">
             <div class="annotation">
               
               <div class="pilwrap ">
-                <a class="pilcrow" href="#section-26">&#182;</a>
+                <a class="pilcrow" href="#section-29">&#182;</a>
               </div>
               <p>Handle exceptions caused by non-JSON responses.</p>
 
@@ -674,11 +725,11 @@ JSON response.</p>
         </li>
         
         
-        <li id="section-27">
+        <li id="section-30">
             <div class="annotation">
               
               <div class="pilwrap ">
-                <a class="pilcrow" href="#section-27">&#182;</a>
+                <a class="pilcrow" href="#section-30">&#182;</a>
               </div>
               <p>The server is set to gzip large response bodies</p>
 
@@ -693,11 +744,11 @@ JSON response.</p>
         </li>
         
         
-        <li id="section-28">
+        <li id="section-31">
             <div class="annotation">
               
               <div class="pilwrap ">
-                <a class="pilcrow" href="#section-28">&#182;</a>
+                <a class="pilcrow" href="#section-31">&#182;</a>
               </div>
               <p>HTML is returned in response to bad requests. Also, variants in
 unlocalized contigs are greeted with a “Page not found” HTML
@@ -706,17 +757,27 @@ response.</p>
             </div>
             
             <div class="content"><div class='highlight'><pre>        <span class="hljs-keyword">if</span> (<span class="hljs-keyword">index</span>($body, <span class="hljs-string">'&lt;!doctype html&gt;'</span>) &gt;= <span class="hljs-number">0</span>) {
-          $data = {<span class="hljs-string">any_covered =&gt;</span> <span class="hljs-keyword">undef</span>};
+          <span class="hljs-keyword">my</span> ($chrom, $pos, $ref, $alt) = <span class="hljs-keyword">split</span> <span class="hljs-string">q{-}</span>, $key;
+          $data = {
+            <span class="hljs-string">key =&gt;</span> $key,
+            <span class="hljs-string">any_covered =&gt;</span> <span class="hljs-keyword">undef</span>,
+            <span class="hljs-string">variant =&gt;</span> {
+              <span class="hljs-string">chrom =&gt;</span> $chrom,
+              <span class="hljs-string">pos =&gt;</span> $pos,
+              <span class="hljs-string">ref =&gt;</span> $ref,
+              <span class="hljs-string">alt =&gt;</span> $alt
+            }
+          };
         }</pre></div></div>
             
         </li>
         
         
-        <li id="section-29">
+        <li id="section-32">
             <div class="annotation">
               
               <div class="pilwrap ">
-                <a class="pilcrow" href="#section-29">&#182;</a>
+                <a class="pilcrow" href="#section-32">&#182;</a>
               </div>
               <p>Success</p>
 
@@ -724,10 +785,11 @@ response.</p>
             
             <div class="content"><div class='highlight'><pre>        <span class="hljs-keyword">else</span> {
           $data = decode_json($body);
+          $data-&gt;{key} = $key;
         }
       }
       catch {
-        <span class="hljs-keyword">say</span> {*STDERR} <span class="hljs-string">"$_ in response from $uri"</span>;
+        <span class="hljs-keyword">say</span> {*STDERR} <span class="hljs-string">"$_ in response from $api_uri/$key"</span>;
 
         <span class="hljs-keyword">my</span> $fh = IO::File-&gt;new(<span class="hljs-string">'bad-response.dump'</span>, <span class="hljs-string">'&gt;'</span>);
         <span class="hljs-keyword">if</span> (<span class="hljs-keyword">defined</span> $fh) {
@@ -741,11 +803,11 @@ response.</p>
         </li>
         
         
-        <li id="section-30">
+        <li id="section-33">
             <div class="annotation">
               
               <div class="pilwrap ">
-                <a class="pilcrow" href="#section-30">&#182;</a>
+                <a class="pilcrow" href="#section-33">&#182;</a>
               </div>
               <p>say STDERR Dumper($data);</p>
 
@@ -765,11 +827,11 @@ response.</p>
         </li>
         
         
-        <li id="section-31">
+        <li id="section-34">
             <div class="annotation">
               
               <div class="pilwrap ">
-                <a class="pilcrow" href="#section-31">&#182;</a>
+                <a class="pilcrow" href="#section-34">&#182;</a>
               </div>
               <hr>
 <h2 id="utility-functions">Utility functions</h2>

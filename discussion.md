@@ -56,6 +56,12 @@ there are multiple possibilities, annotate with the most deleterious possibility
 
 5. **Allele frequency of variant from Broad Institute ExAC Project API (API documentation is available here: http://exac.hms.harvard.edu/)**
 
+   In INFO tag `AF`. Comma-separated values for multiallelic variants, omitted
+   where no data are available:
+   ```
+   AF=0.07306,;
+   ```
+
 6. **Additional optional information from ExAC that you feel might be relevant**
 
 

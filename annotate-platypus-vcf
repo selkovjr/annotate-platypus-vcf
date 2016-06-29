@@ -10,8 +10,14 @@
 #
 # All annotations are added as new tags in the INFO column, including:
 #
-# * `TYPE=SNP|MNP|INS|DEL|COMPLEX|MATCH`
-# * `CONS=SNP|MNP|INS|DEL|COMPLEX|MATCH`
+# * Variant type: `TYPE=SNP|MNP|INS|DEL|COMPLEX|MATCH`
+# * Allele frequency: `AF=[0.0..1.0]`
+# * ALT-REF percent frequencies: `ARF=[0.0..100.0]:[0.0..100.0]`
+# * Variant effect prediction: `VEP=...`
+#
+# The annotations for multiallelic variants are represented as comma-separated
+# lists, _e.g._, `AF=0.07306,;` (The first allele's frequency is 0.07306; data
+# not available for the second).
 #
 use strict;
 use warnings FATAL => qw[ all ];
@@ -31,6 +37,7 @@ use Try::Tiny;
 use AnyEvent::HTTP;
 use JSON::XS qw[ decode_json ];
 use Promises qw[ collect deferred ];
+use List::MoreUtils qw[ firstidx ];
 
 our $VERSION = 0.1;
 
@@ -125,16 +132,20 @@ while (my $x = $vcf_in->next_data_hash()) {
     }
   }
 
-  # **Fetch consequence predictions from ExAC**
+  # **Fetch predictions and population data from ExAC**
+  #
+
+  # Use a state varible to wrap multiallelic requests in a single
+  # transaction.
   my $transaction = AnyEvent->condvar;
 
   # Make a separate request for each allele and lump them in a single promise
   collect (
     map { # make a list of promises
-      retrieve ( "http://exac.hms.harvard.edu/rest/variant/$_" )
+      retrieve ( "http://exac.hms.harvard.edu/rest/variant", $_ )
     } @{$var_info->{allele}}
   )->then (
-    # send all fulfilled promises to consumer
+    # Send all fulfilled promises to consumer
     sub {
       $transaction->send(\@_);
     },
@@ -143,13 +154,17 @@ while (my $x = $vcf_in->next_data_hash()) {
   );
 
   # Block until all of this variant's allele-specific requests have received a
-  # response. Extract allele data from each response and hang it on to
+  # response. Responses can come out of order, so storing them as a hash allows
+  # order reconstruction from `(@{$var_info->{allele}}`.
+  my %response = map {$_->[0]->{key}, $_->[0]} @{$transaction->recv};
+
+  # Extract allele data from each response and hang it on to
   # `$var_info` produced by initial variant classification.
-  my $responses = $transaction->recv;
-  foreach my $allele ( map {$_->[0]} @{$responses} ) {
-    if ( $allele->{any_covered} and $allele->{variant}->{variant_id} ) {
-      say $allele->{variant}->{variant_id};
+  foreach my $variant_id (@{$var_info->{allele}}) { # in order
+    my $allele = $response{$variant_id};
+    if ( $allele->{any_covered} and exists $allele->{variant}->{allele_freq}) {
       push @{$var_info->{allele_freq}}, sprintf '%7.5f', $allele->{variant}->{allele_freq};  ### 2 ###
+      say $allele->{variant}->{variant_id};
 
       say $allele->{variant}->{allele_count};
       say $allele->{variant}->{allele_num};
@@ -157,6 +172,7 @@ while (my $x = $vcf_in->next_data_hash()) {
       say join q{,}, map {$_->{major_consequence}} @{$allele->{variant}->{vep_annotations}};
     }
     else {
+      push @{$var_info->{allele_freq}}, '';  ### 2 ###
     }
   }
 
@@ -172,7 +188,8 @@ while (my $x = $vcf_in->next_data_hash()) {
   }
   $x->{INFO}->{ARF} = join q{,}, @ratio;  ### 4 ###
 
-  if (exists $var_info->{allele_freq}) {
+  # Check that the array of allele frequencies has a non-null value
+  if (grep {$_} @{$var_info->{allele_freq}}) {
     $x->{INFO}->{AF} = join q{,}, @{$var_info->{allele_freq}};
   }
 
@@ -361,9 +378,10 @@ sub indel_maps {
 # JSON response.
 #
 sub retrieve {
-  my ($uri) = @_;
+  my ($api_uri, $key) = @_;
   my $d = deferred;
-  http_get $uri => sub {
+
+  http_get "$api_uri/$key" => sub {
     my ($body, $header) = @_;
     my $data;
     if ($header->{Status} == SUCCESS) {
@@ -380,16 +398,27 @@ sub retrieve {
         # unlocalized contigs are greeted with a "Page not found" HTML
         # response.
         if (index($body, '<!doctype html>') >= 0) {
-          $data = {any_covered => undef};
+          my ($chrom, $pos, $ref, $alt) = split q{-}, $key;
+          $data = {
+            key => $key,
+            any_covered => undef,
+            variant => {
+              chrom => $chrom,
+              pos => $pos,
+              ref => $ref,
+              alt => $alt
+            }
+          };
         }
 
         # Success
         else {
           $data = decode_json($body);
+          $data->{key} = $key;
         }
       }
       catch {
-        say {*STDERR} "$_ in response from $uri";
+        say {*STDERR} "$_ in response from $api_uri/$key";
 
         my $fh = IO::File->new('bad-response.dump', '>');
         if (defined $fh) {

@@ -38,7 +38,7 @@ there are multiple possibilities, annotate with the most deleterious possibility
 3. **Number of reads supporting the variant.**
 
    This is annotated in Platypus output using the INFO tag `TR` (Total number of
-   reads containing this variant), and separately in the sample-level tag `NV`
+   reads covering this variant), and separately in the sample-level tag `NV`
    (Number of reads containing varinat in this sample).
 
 4. **Percentage of reads supporting the variant versus those supporting reference reads.**

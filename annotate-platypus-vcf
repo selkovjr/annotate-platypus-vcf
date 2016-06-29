@@ -68,17 +68,24 @@ foreach my $line (@{$vcf_in->{header_lines}}) {
     $info_seen++;
     $vcf_out->add_header_line({
       key => 'INFO',
+      ID => 'AF',
+      Number => 'A',
+      Type => 'Float',
+      Description => 'Allele frequency from ExAC'
+    });
+    $vcf_out->add_header_line({
+      key => 'INFO',
+      ID => 'ARF',
+      Number => 'A',
+      Type => 'Float',
+      Description => 'Percent frequencies of ALT and REF alleles'
+    });
+    $vcf_out->add_header_line({
+      key => 'INFO',
       ID => 'TYPE',
       Number => 'A',
       Type => 'String',
       Description => 'The type of allele: SNP, MNP, INS, DEL, or COMPLEX'
-    });
-    $vcf_out->add_header_line({
-      key => 'INFO',
-      ID => 'ARR',
-      Number => 'A',
-      Type => 'Float',
-      Description => 'ALT to REF per cent ratio'
     });
   }
   $vcf_out->add_header_line($line); # The rest of the header
@@ -123,26 +130,26 @@ while (my $x = $vcf_in->next_data_hash()) {
 
   # Make a separate request for each allele and lump them in a single promise
   collect (
-    map { # a list of promises
+    map { # make a list of promises
       retrieve ( "http://exac.hms.harvard.edu/rest/variant/$_" )
     } @{$var_info->{allele}}
-  )
-  ->then (
+  )->then (
+    # send all fulfilled promises to consumer
     sub {
-      # send all fulfilled promises to consumer, one for each allele
       $transaction->send(\@_);
     },
+
     sub { $transaction->croak( 'ERROR' ) }
   );
 
-  # Block until all of this variant's alleles have been received
-  my $response = $transaction->recv;
-
-  # Gather allele-specific data to insert into INFO
-  foreach my $allele ( map {$_->[0]} @{$response} ) {
+  # Block until all of this variant's allele-specific requests have received a
+  # response. Extract allele data from each response and hang it on to
+  # `$var_info` produced by initial variant classification.
+  my $responses = $transaction->recv;
+  foreach my $allele ( map {$_->[0]} @{$responses} ) {
     if ( $allele->{any_covered} and $allele->{variant}->{variant_id} ) {
       say $allele->{variant}->{variant_id};
-      say sprintf '%7.5f', $allele->{variant}->{allele_freq};
+      push @{$var_info->{allele_freq}}, sprintf '%7.5f', $allele->{variant}->{allele_freq};
       say $allele->{variant}->{allele_count};
       say $allele->{variant}->{allele_num};
       say join q{,}, @{$allele->{variant}->{genes}};
@@ -154,6 +161,9 @@ while (my $x = $vcf_in->next_data_hash()) {
 
   # **Add annotations and write the augmented variant**
   $x->{INFO}->{TYPE} = join q{,}, @{$var_info->{type}};
+  if (exists $var_info->{allele_freq}) {
+    $x->{INFO}->{AF} = join q{,}, @{$var_info->{allele_freq}};
+  }
 
   print $vcf_out->format_line($x);
 

@@ -52,14 +52,14 @@ Platypus | TVC | Type | Description
 ---------|-----|------|------------
 | | `AO` | Integer | Alternate allele observation count
 | | `DP` | Integer | Read depth
-| `GL` | | Float | _log<sub>10</sub>_-likelihoods for _AA_, _AB_ and _BB_ genotypes, where _A_ = _ref_ and _B_ = _variant_. Only applicable to bi-allelic sites.
+| `GL` | | Float | _log<sub>10</sub>_ likelihoods for _AA_, _AB_ and _BB_ genotypes, where _A_ = _ref_ and _B_ = _variant_. Only applicable to bi-allelic sites.
 `GOF` | | Float | Goodness-of-fit value
 `GQ` | | Integer | Genotype quality as Phred score
 | | `GQ` | Integer | Genotype quality, the Phred-scaled marginal (or unconditional) probability of the called genotype
 `GT` | | String | Unphased genotypes
 | | `GT` | String | Genotype
-`NR` | | Integer | Number of reverse reads covering variant location in this sample
-`NV` | | Integer | Total number of reads covering variant location in this sample
+`NR` | | Integer | Number of reads covering variant location in this sample
+`NV` | | Integer | Total number of reads containing variant location in this sample
 | | `RO` | Integer | Reference allele observation count
 | | `SAF` | Integer | Alternate allele observations on the forward strand
 | | `SAR` | Integer | Alternate allele observations on the reverse strand

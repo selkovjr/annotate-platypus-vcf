@@ -33,9 +33,11 @@ use JSON::XS qw[ decode_json ];
 use Promises qw[ collect deferred ];
 
 our $VERSION = 0.1;
+
+use constant SUCCESS => 200;
 my $REFERENCE;
 
-#______________________
+#__________________________________________________________________
 #
 # ### Main program
 #
@@ -45,20 +47,21 @@ my $REFERENCE;
 # normalization.
 
 
-# The only optional input is the reference genome (-r)
+# The only optional input is reference genome (-r) that is used to validate
+# normalized indels. It is ignored while processing SNP-only VCFs.
 my $opts = parse_params();
 my $vcf_in  = Vcf->new(fh => \*STDIN);
 $vcf_in->parse_header();
 
 # #### Header
 
-# Version change is a precaution against the possibility of new annotations
-# being incompatible with v4.0.
+# Version change is a paranoid precaution against the possibility of new
+# annotations being incompatible with VCF 4.0.
 shift @{$vcf_in->{header_lines}}; # discard the version line
 my $vcf_out = Vcf->new(version => '4.1');
 
 # Copy the input header to the output stream, inserting new INFO tag
-# descriptions before the old ones.
+# descriptions in front of the old ones.
 my $info_seen;
 foreach my $line (@{$vcf_in->{header_lines}}) {
   if ($line->{key} eq 'INFO' and not $info_seen) { # The first INFO line
@@ -84,38 +87,38 @@ $vcf_out->add_columns(@{$vcf_in->{columns}});
 print $vcf_out->format_header();
 
 #
-# #### Each data line
+# #### Data
 #
+
+# Each VCF line
 while (my $x = $vcf_in->next_data_hash()) {
 
-  # Local processing
+  # **Local processing**
   fill_genotype_defaults($x);
   my $var_info = classify_variant($x);
 
-  # If there is an indel, new left-aligned, minimized REF and ALT alleles must
-  # be computed
+  # If there is an indel, then a new set of left-aligned, minimized REF and ALT
+  # alleles must be computed.
 
   if ( $var_info->{indel} ) {
     my ($map, $alt_to_mapref) = indel_maps($x, $vcf_in);
-    say STDERR Dumper($alt_to_mapref);
-    say STDERR Dumper($map);
 
+    # Use
+    # [Vcf::fill_ref_alt_mapping()](http://search.cpan.org/dist/VCF-1.0/lib/VCF/V4_0.pm#fill_ref_alt_mapping)
+    # to find the minimal reference segment containing all variants.
     $x->{REF} = $vcf_out->fill_ref_alt_mapping($map);
     if (not defined $x->{REF}) {
       error("Failed on line $x->{CHROM}:$x->{POS}");
     }
 
     for my $i (0 .. @{$x->{ALT}} - 1) {
-      my $ori_ref = $alt_to_mapref->{$x->{ALT}[$i]}{ref};
-      my $ori_alt = $alt_to_mapref->{$x->{ALT}[$i]}{alt};
-      $x->{ALT}[$i] = $map->{$ori_ref}{$ori_alt};
+      my $orig_ref = $alt_to_mapref->{$x->{ALT}[$i]}{ref};
+      my $orig_alt = $alt_to_mapref->{$x->{ALT}[$i]}{alt};
+      $x->{ALT}[$i] = $map->{$orig_ref}{$orig_alt};
     }
   }
 
-  # Add new fields
-  $x->{INFO}->{TYPE} = join ',', @{$var_info->{type}};
-
-  # External processing (ExAC)
+  # **Fetch consequence predictions from ExAC**
   my $transaction = AnyEvent->condvar;
 
   # Make a separate request for each allele and lump them in a single promise
@@ -136,36 +139,42 @@ while (my $x = $vcf_in->next_data_hash()) {
   my $response = $transaction->recv;
 
   # Gather allele-specific data to insert into INFO
-  foreach my $allele (map {$_->[0]} @$response) {
-    if ($allele->{any_covered} and $allele->{variant}->{variant_id}) {
+  foreach my $allele ( map {$_->[0]} @{$response} ) {
+    if ( $allele->{any_covered} and $allele->{variant}->{variant_id} ) {
       say $allele->{variant}->{variant_id};
       say sprintf '%7.5f', $allele->{variant}->{allele_freq};
       say $allele->{variant}->{allele_count};
       say $allele->{variant}->{allele_num};
-      say join ',', @{$allele->{variant}->{genes}};
-      say join ',', map {$_->{major_consequence}} @{$allele->{variant}->{vep_annotations}};
+      say join q{,}, @{$allele->{variant}->{genes}};
+      say join q{,}, map {$_->{major_consequence}} @{$allele->{variant}->{vep_annotations}};
     }
     else {
     }
   }
+
+  # **Add annotations and write the augmented variant**
+  $x->{INFO}->{TYPE} = join q{,}, @{$var_info->{type}};
+
   print $vcf_out->format_line($x);
 
 } # next_data_hash()
 
-
-#______________________________________________________________________________
+#__________________________________________________________________
 #
-# **fill_genottype_defaults($vcf)**
+# ### Functions
+#
+
+# **fill_genottype_defaults($var)**
 #
 # Add default FORMAT values not present in the input VCF
 #
 sub fill_genotype_defaults {
-  my $vcf = shift;
+  my $var = shift;
 
-  # This function's body is copied from
+  # This function's body was copied from
   # [vcf-convert](https://github.com/vcftools/vcftools/blob/master/src/perl/vcf-convert).
-  for my $gt (values %{$vcf->{gtypes}}) {
-    for my $field (@{$vcf->{FORMAT}}) {
+  for my $gt (values %{$var->{gtypes}}) {
+    for my $field (@{$var->{FORMAT}}) {
 
       # Skip the GT tag, so that ploidy information is not lost (`./.` would become `.`)
       next if $field eq 'GT';
@@ -196,9 +205,9 @@ sub fill_genotype_defaults {
 }
 
 
-#______________________________________________________________________________
+#__________________________________________________________________
 #
-# **classify_variant($vcf)**
+# **classify_variant($var)**
 #
 # Parse the ALT column and see if there are indels. To allow uniform treatment
 # of mono-allelic and multi-allelic variants, return allele IDs (suitable for
@@ -258,7 +267,7 @@ sub classify_variant {
 } # classify_variant()
 
 
-#________________________________________________________________________
+#__________________________________________________________________
 #
 # **indel_maps($var, $input_vcf)** -> $map, $alt_to_mapref
 #
@@ -274,7 +283,7 @@ sub classify_variant {
 #   C => {ref => CTGTG, alt => C}
 # }
 # ```
-# This function's body is copied (with modifications) from
+# This function's body was copied (with modifications) from
 # [vcf-convert](https://github.com/vcftools/vcftools/blob/master/src/perl/vcf-convert).
 #
 sub indel_maps {
@@ -336,7 +345,7 @@ sub retrieve {
   http_get $uri => sub {
     my ($body, $header) = @_;
     my $data;
-    if ($header->{Status} == 200) {
+    if ($header->{Status} == SUCCESS) {
       # Handle exceptions caused by non-JSON responses.
       try {
         # The server is set to gzip large response bodies
@@ -362,8 +371,10 @@ sub retrieve {
         say {*STDERR} "$_ in response from $uri";
 
         my $fh = IO::File->new('bad-response.dump', '>');
-        print {$fh} Data::Dumper->Dump([$header, $body], [qw(header body)]);
-        close {$fh};
+        if (defined $fh) {
+          print {$fh} Data::Dumper->Dump([$header, $body], [qw(header body)]);
+          $fh->close;
+        }
 
         $d->reject();
       };
@@ -379,6 +390,10 @@ sub retrieve {
   return $d->promise;
 }
 
+#________________________________________________________________________
+#
+# ## Utility functions
+#
 sub usage {
   my $self = basename $PROGRAM_NAME;
 
@@ -409,7 +424,7 @@ sub parse_params {
       next;
     }
 
-    if ($arg eq '-?' or $arg eq '-h' or $arg eq '--help') {
+    if ($arg eq q{-?} or $arg eq '-h' or $arg eq '--help') {
       usage();
       exit 1;
     }

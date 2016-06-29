@@ -1,2 +1,4 @@
-Indels present, missing the -r option. at ./annotate-platypus-vcf line 535, <STDIN> line 52.
+fetching 1-181548341-A-G
+fetching 1-181719679-C-T
+Indels present, missing the -r option. at ./annotate-platypus-vcf line 536, <STDIN> line 52.
 	main::error("Indels present, missing the -r option.") called at ./annotate-platypus-vcf line 420

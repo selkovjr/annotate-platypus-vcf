@@ -453,6 +453,7 @@ sub retrieve {
   my ($api_uri, $key) = @_;
   my $d = deferred;
 
+  say {*STDERR} "fetching $key";
   http_get "$api_uri/$key" => sub {
     my ($body, $header) = @_;
     my $data;
@@ -615,7 +616,7 @@ BEGIN {
       'HIGH'
     ],
     ['start_lost',
-      q{A codon variant that changes at least one base of the canonical start codo},
+      q{A codon variant that changes at least one base of the canonical start codon},
       'SO:0002012',
       'Start lost',
       'HIGH'
@@ -628,15 +629,22 @@ BEGIN {
       'HIGH'
     ],
     [
+      'initiator_codon_variant',
+      q{A codon variant that changes at least one base of the first codon of a transcript},
+      'SO:0001821',
+      'Inframe variant',
+      'MODERATE'
+    ],
+    [
       'inframe_insertion',
-      q{An inframe non synonymous variant that inserts bases into in the coding sequenc},
+      q{An inframe non synonymous variant that inserts bases into in the coding sequence},
       'SO:0001821',
       'Inframe insertion',
       'MODERATE'
     ],
     [
       'inframe_deletion',
-      q{An inframe non synonymous variant that deletes bases from the coding sequenc},
+      q{An inframe non synonymous variant that deletes bases from the coding sequence},
       'SO:0001822',
       'Inframe deletion',
       'MODERATE'

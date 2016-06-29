@@ -1,5 +1,18 @@
 #!/usr/bin/env perl
 
+# Add a set of tags to VCF annotations in Platypus output.
+#
+# ## Usage
+#
+# `annotate-platypus-vcf [-r reference.fa] < input.vcf > annotated.vcf`
+#
+# ## Annotations
+#
+# All annotations are added as new tags in the INFO column, including:
+#
+# * `TYPE=SNP|MNP|INS|DEL|COMPLEX|MATCH`
+# * `CONS=SNP|MNP|INS|DEL|COMPLEX|MATCH`
+#
 use strict;
 use warnings FATAL => qw[ all ];
 use feature qw[ state say ];
@@ -20,20 +33,35 @@ use JSON::XS qw[ decode_json ];
 use Promises qw[ collect deferred ];
 
 our $VERSION = 0.1;
+my $REFERENCE;
 
-# -------------------------------- sub main ------------------------------------
+#______________________
+#
+# ### Main program
+#
+# This code is derived from
+# [vcf-convert](https://github.com/vcftools/vcftools/blob/master/src/perl/vcf-convert)
+# and it retains some homology around data input and indel allele
+# normalization.
+
+
+# The only optional input is the reference genome (-r)
 my $opts = parse_params();
 my $vcf_in  = Vcf->new(fh => \*STDIN);
+$vcf_in->parse_header();
+
+# #### Header
+
+# Version change is a precaution against the possibility of new annotations
+# being incompatible with v4.0.
+shift @{$vcf_in->{header_lines}}; # discard the version line
 my $vcf_out = Vcf->new(version => '4.1');
 
-# Convert the header
-$vcf_in->parse_header();
-shift @{$vcf_in->{header_lines}}; # discard format version
-
+# Copy the input header to the output stream, inserting new INFO tag
+# descriptions before the old ones.
 my $info_seen;
 foreach my $line (@{$vcf_in->{header_lines}}) {
-  # Insert definitions for new info tags
-  if ($line->{key} eq 'INFO' and not $info_seen) {
+  if ($line->{key} eq 'INFO' and not $info_seen) { # The first INFO line
     $info_seen++;
     $vcf_out->add_header_line({
       key => 'INFO',
@@ -50,132 +78,27 @@ foreach my $line (@{$vcf_in->{header_lines}}) {
       Description => 'ALT to REF per cent ratio'
     });
   }
-
-  # Carry on with the rest of the header
-  $vcf_out->add_header_line($line);
+  $vcf_out->add_header_line($line); # The rest of the header
 }
-
 $vcf_out->add_columns(@{$vcf_in->{columns}});
 print $vcf_out->format_header();
 
-
-# For each VCF line
-my $fa;
+#
+# #### Each data line
+#
 while (my $x = $vcf_in->next_data_hash()) {
 
   # Local processing
-  # Convert missing (default) FORMAT values
-  for my $gt (values %{$x->{gtypes}}) {
-    for my $field (@{$x->{FORMAT}}) {
-      # Skip the GT tag, so that ploidy information is not lost ("./." would become ".")
-      next if $field eq 'GT';
+  fill_genotype_defaults($x);
+  my $var_info = classify_variant($x);
 
-      if ( $field eq 'FT' and $gt->{$field} eq $vcf_in->{filter_passed} ) {
-        $gt->{$field} = $vcf_out->{filter_passed};
-      }
+  # If there is an indel, new left-aligned, minimized REF and ALT alleles must
+  # be computed
 
-      if ( exists $vcf_in->{defaults}{$field} and $vcf_in->{defaults}{$field} eq $gt->{$field} ) {
-        $gt->{$field} = $vcf_out->{defaults}{$field};
-        next;
-      }
-
-      if (
-        exists $gt->{$field} and
-        exists $vcf_in->{header}{FORMAT}{$field}{default} and
-        $vcf_in->{header}{FORMAT}{$field}{default} eq $gt->{$field}
-      ) {
-        delete $gt->{$field};
-      }
-    }
-  }
-
-  # Parse the ALT column and see if there are indels
-  my @allele;
-  my @type;
-  my @arr;
-  my $has_indel;
-  for my $alt (@{$x->{ALT}}) {
-    my ($type, $len, $ht) = $vcf_in->event_type($x, $alt);
-
-    push @allele, "$x->{CHROM}-$x->{POS}-$x->{REF}-$alt";
-
-    if ( $type eq 's' ) {
-      if ($len == 1) {
-        push @type, 'SNP';
-      }
-      else {
-        if (length $x->{REF} == length $alt and length $alt == $len) {
-          push @type, 'MNP';
-        }
-        else {
-          push @type, 'COMPLEX';
-        }
-      }
-      next;
-    }
-
-    if ( $type eq 'r' ) {
-      push @type, 'MATCH';
-      next;
-    }
-
-    if ( $type ne 'i' ) {
-      error("FIXME: expected indel at $x->{CHROM}:$x->{POS}");
-    }
-
-    if ($len > 0) {
-      push @type, 'INS';
-    }
-    else {
-      push @type, 'DEL';
-    }
-
-    $has_indel++;
-  }
-
-  # If there is an indel, new REF and ALT must be changed
-  if ( $has_indel ) {
-    my $map = {};
-    my $alt_to_mapref = {};
-
-    for my $alt (@{$x->{ALT}}) {
-      my ($type, $len, $ht) = $vcf_in->event_type($x, $alt);
-      if ( $type eq 's' or $type eq 'r' ) {
-        $alt_to_mapref->{$alt} = {ref => $x->{REF}, alt => $alt};
-        $map->{$x->{REF}}{$alt} = 1;
-        next;
-      }
-
-      if ( $type eq 'i' and $len > 0 ) {
-        my $tmp = $x->{REF}.$ht;
-        $alt_to_mapref->{$alt} = {ref => $x->{REF}, alt => $tmp};
-        $map->{$x->{REF}}{$tmp} = 1;
-        next;
-      }
-      elsif ( $type eq 'i' and $len < 0 ) {
-        if ( not $fa ) {
-          if ( not $opts->{refseq} ) {
-            error('Indels present, missing the -r option.');
-          }
-          $fa = FaSlice->new(file => $opts->{refseq}, size => 1_000_000);
-        }
-        my $ref   = $fa->get_slice($x->{CHROM}, $x->{POS}, $x->{POS} + abs $len);
-        my $nref1 = uc substr $ref, 0, 1;
-        my $oref1 = uc substr $x->{REF}, 0, 1;
-
-        # Sanity check
-        if ( $oref1 ne $nref1 ) {
-          error("Sanity check failed: the ref does not agree at $x->{CHROM}:$x->{POS} .. [$nref1] in .fa,  [$oref1] in .vcf");
-        }
-
-        $alt_to_mapref->{$alt} = { ref => $ref, alt => $nref1 };
-        $map->{$ref}{$nref1} = 1;
-        next;
-      }
-      else {
-        error("Uh, FIXME: $x->{CHROM}:$x->{POS} [$type] [$len] [$ht]");
-      }
-    }
+  if ( $var_info->{indel} ) {
+    my ($map, $alt_to_mapref) = indel_maps($x, $vcf_in);
+    say STDERR Dumper($alt_to_mapref);
+    say STDERR Dumper($map);
 
     $x->{REF} = $vcf_out->fill_ref_alt_mapping($map);
     if (not defined $x->{REF}) {
@@ -187,11 +110,10 @@ while (my $x = $vcf_in->next_data_hash()) {
       my $ori_alt = $alt_to_mapref->{$x->{ALT}[$i]}{alt};
       $x->{ALT}[$i] = $map->{$ori_ref}{$ori_alt};
     }
-
-  } # has indel
+  }
 
   # Add new fields
-  $x->{INFO}->{TYPE} = join ',', @type;
+  $x->{INFO}->{TYPE} = join ',', @{$var_info->{type}};
 
   # External processing (ExAC)
   my $transaction = AnyEvent->condvar;
@@ -200,7 +122,7 @@ while (my $x = $vcf_in->next_data_hash()) {
   collect (
     map { # a list of promises
       retrieve ( "http://exac.hms.harvard.edu/rest/variant/$_" )
-    } @allele
+    } @{$var_info->{allele}}
   )
   ->then (
     sub {
@@ -230,6 +152,184 @@ while (my $x = $vcf_in->next_data_hash()) {
 
 } # next_data_hash()
 
+
+#______________________________________________________________________________
+#
+# **fill_genottype_defaults($vcf)**
+#
+# Add default FORMAT values not present in the input VCF
+#
+sub fill_genotype_defaults {
+  my $vcf = shift;
+
+  # This function's body is copied from
+  # [vcf-convert](https://github.com/vcftools/vcftools/blob/master/src/perl/vcf-convert).
+  for my $gt (values %{$vcf->{gtypes}}) {
+    for my $field (@{$vcf->{FORMAT}}) {
+
+      # Skip the GT tag, so that ploidy information is not lost (`./.` would become `.`)
+      next if $field eq 'GT';
+
+      if ( $field eq 'FT' and $gt->{$field} eq $vcf_in->{filter_passed}) {
+        $gt->{$field} = $vcf_out->{filter_passed};
+      }
+
+      if (
+        exists $vcf_in->{defaults}{$field} and
+        $vcf_in->{defaults}{$field} eq $gt->{$field}
+      ) {
+        $gt->{$field} = $vcf_out->{defaults}{$field};
+        next;
+      }
+
+      if (
+        exists $gt->{$field} and
+        exists $vcf_in->{header}{FORMAT}{$field}{default} and
+        $vcf_in->{header}{FORMAT}{$field}{default} eq $gt->{$field}
+      ) {
+        delete $gt->{$field};
+      }
+    }
+  }
+
+  return 1;
+}
+
+
+#______________________________________________________________________________
+#
+# **classify_variant($vcf)**
+#
+# Parse the ALT column and see if there are indels. To allow uniform treatment
+# of mono-allelic and multi-allelic variants, return allele IDs (suitable for
+# ExAC queries) and variant types as arrays.
+#
+sub classify_variant {
+  my $var = shift;
+  my $info = {
+    allele => [],
+    type => [],
+  };
+
+  # This function's body is derived from
+  # [vcf-convert](https://github.com/vcftools/vcftools/blob/master/src/perl/vcf-convert).
+  #
+  for my $alt (@{$var->{ALT}}) {
+    my ($type, $len, $ht) = $vcf_in->event_type($var, $alt);
+
+    push @{$info->{allele}}, "$var->{CHROM}-$var->{POS}-$var->{REF}-$alt";
+
+    if ( $type eq 's' ) {
+      if ($len == 1) {
+        push @{$info->{type}}, 'SNP';
+      }
+      else {
+        if (length $var->{REF} == length $alt and length $alt == $len) {
+          push @{$info->{type}}, 'MNP';
+        }
+        else {
+          push @{$info->{type}}, 'COMPLEX';
+        }
+      }
+      next;
+    }
+
+    if ( $type eq 'r' ) {
+      push @{$info->{type}}, 'MATCH';
+      next;
+    }
+
+    if ( $type ne 'i' ) {
+      error("FIXME: expected indel at $var->{CHROM}:$var->{POS}");
+    }
+
+    if ($len > 0) {
+      push @{$info->{type}}, 'INS';
+    }
+    else {
+      push @{$info->{type}}, 'DEL';
+    }
+
+    $info->{indel}++;
+
+  } # each ALT allele
+
+  return $info;
+} # classify_variant()
+
+
+#________________________________________________________________________
+#
+# **indel_maps($var, $input_vcf)** -> $map, $alt_to_mapref
+#
+# Prepare a couple maps to unify REF and ALT alleles with
+# [Vcf::fill_ref_alt_mapping()](http://search.cpan.org/dist/VCF-1.0/lib/VCF/V4_0.pm#fill_ref_alt_mapping).
+#
+# For example, for the variant `CTGTGTG -> C,CTG` the maps are constructed as:
+#
+# ```
+# $map = {CTG => {C => 1}, CTGTG => {C => 1}}
+# $alt_to_mapref = {
+#   CTG => {ref => CTG, alt => C},
+#   C => {ref => CTGTG, alt => C}
+# }
+# ```
+# This function's body is copied (with modifications) from
+# [vcf-convert](https://github.com/vcftools/vcftools/blob/master/src/perl/vcf-convert).
+#
+sub indel_maps {
+  my ($var, $input_vcf) = @_;
+  my $map = {};
+  my $alt_to_mapref = {};
+
+  for my $alt (@{$var->{ALT}}) {
+    my ($type, $len, $ht) = $input_vcf->event_type($var, $alt);
+    if ( $type eq 's' or $type eq 'r' ) { # SNP / MATCH
+      $alt_to_mapref->{$alt} = {ref => $var->{REF}, alt => $alt};
+      $map->{$var->{REF}}{$alt} = 1;
+      next;
+    }
+
+    if ( $type eq 'i' and $len > 0 ) { # INS
+      my $tmp = $var->{REF}.$ht;
+      $alt_to_mapref->{$alt} = {ref => $var->{REF}, alt => $tmp};
+      $map->{$var->{REF}}{$tmp} = 1;
+      next;
+    }
+    elsif ( $type eq 'i' and $len < 0 ) { # DEL
+      if ( not $REFERENCE ) {
+        if ( not $opts->{refseq} ) {
+          error('Indels present, missing the -r option.');
+        }
+        $REFERENCE = FaSlice->new(file => $opts->{refseq}, size => 1_000_000);
+      }
+      my $ref   = $REFERENCE->get_slice($var->{CHROM}, $var->{POS}, $var->{POS} + abs $len);
+      my $nref1 = uc substr $ref, 0, 1;
+      my $oref1 = uc substr $var->{REF}, 0, 1;
+
+      if ( $oref1 ne $nref1 ) { # Sanity check
+        error("Sanity check failed: the ref does not agree at $var->{CHROM}:$var->{POS} .. [$nref1] in .fa,  [$oref1] in .vcf");
+      }
+
+      $alt_to_mapref->{$alt} = { ref => $ref, alt => $nref1 };
+      $map->{$ref}{$nref1} = 1;
+      next;
+    }
+    else { # Unknown variant type
+      error("Uh, FIXME: $var->{CHROM}:$var->{POS} [$type] [$len] [$ht]");
+    }
+  } # each allele
+
+  return ($map, $alt_to_mapref);
+}
+
+#________________________________________________________________________
+#
+# **retrieve($uri)**
+#
+# Launch a web fetch request a URI. Return a promise to deliver a decoded
+# JSON response.
+#
 sub retrieve {
   my ($uri) = @_;
   my $d = deferred;
@@ -237,16 +337,23 @@ sub retrieve {
     my ($body, $header) = @_;
     my $data;
     if ($header->{Status} == 200) {
+      # Handle exceptions caused by non-JSON responses.
       try {
+        # The server is set to gzip large response bodies
         if ($header->{'content-encoding'} and $header->{'content-encoding'} eq 'gzip') {
           my $buffer;
           gunzip \$body => \$buffer;
           $body = $buffer;
         }
 
-        if (index($body, '<!doctype html>') >= 0) { # probably an error
+        # HTML is returned in response to bad requests. Also, variants in
+        # unlocalized contigs are greeted with a "Page not found" HTML
+        # response.
+        if (index($body, '<!doctype html>') >= 0) {
           $data = {any_covered => undef};
         }
+
+        # Success
         else {
           $data = decode_json($body);
         }

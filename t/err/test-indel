@@ -1,2 +1,0 @@
-Indels present, missing the -r option. at ./annotate-platypus-vcf line 292, <STDIN> line 52.
-	main::error("Indels present, missing the -r option.") called at ./annotate-platypus-vcf line 157

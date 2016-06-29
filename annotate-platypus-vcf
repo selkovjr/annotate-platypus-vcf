@@ -149,7 +149,8 @@ while (my $x = $vcf_in->next_data_hash()) {
   foreach my $allele ( map {$_->[0]} @{$responses} ) {
     if ( $allele->{any_covered} and $allele->{variant}->{variant_id} ) {
       say $allele->{variant}->{variant_id};
-      push @{$var_info->{allele_freq}}, sprintf '%7.5f', $allele->{variant}->{allele_freq};
+      push @{$var_info->{allele_freq}}, sprintf '%7.5f', $allele->{variant}->{allele_freq};  ### 2 ###
+
       say $allele->{variant}->{allele_count};
       say $allele->{variant}->{allele_num};
       say join q{,}, @{$allele->{variant}->{genes}};
@@ -160,7 +161,17 @@ while (my $x = $vcf_in->next_data_hash()) {
   }
 
   # **Add annotations and write the augmented variant**
-  $x->{INFO}->{TYPE} = join q{,}, @{$var_info->{type}};
+  $x->{INFO}->{TYPE} = join q{,}, @{$var_info->{type}};  ### 1 ###
+
+  my @ratio;
+  my $total_cov = $x->{INFO}->{TC};
+  foreach my $alt_cov (split /,/, $x->{INFO}->{TR}) {
+    my $percent_alt = sprintf "%5.3f", 100.0 * $alt_cov / $total_cov;
+    my $percent_ref = sprintf "%5.3f", 100.0 * ($total_cov - $alt_cov) / $total_cov;
+    push @ratio, "$percent_alt:$percent_ref";
+  }
+  $x->{INFO}->{ARF} = join q{,}, @ratio;  ### 4 ###
+
   if (exists $var_info->{allele_freq}) {
     $x->{INFO}->{AF} = join q{,}, @{$var_info->{allele_freq}};
   }

@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+  <title>annotate-platypus-vcf</title>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+  <meta name="viewport" content="width=device-width, target-densitydpi=160dpi, initial-scale=1.0; maximum-scale=1.0; user-scalable=0;">
+  <link rel="stylesheet" media="all" href="docco.css" />
+</head>
+<body>
+  <div id="container">
+    <div id="background"></div>
+    
+    <ul class="sections">
+        
+          <li id="title">
+              <div class="annotation">
+                  <h1>annotate-platypus-vcf</h1>
+              </div>
+          </li>
+        
+        
+        
+        <li id="section-1">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-1">&#182;</a>
+              </div>
+              
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="hljs-comment">#!/usr/bin/env perl</span></pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-2">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-2">&#182;</a>
+              </div>
+              <p>Add a set of tags to VCF annotations in Platypus output.</p>
+<h2 id="usage">Usage</h2>
+<p><code>annotate-platypus-vcf [-r reference.fa] &lt; input.vcf &gt; annotated.vcf</code></p>
+<h2 id="annotations">Annotations</h2>
+<p>All annotations are added as new tags in the INFO column, including:</p>
+<ul>
+<li><code>TYPE=SNP|MNP|INS|DEL|COMPLEX|MATCH</code></li>
+<li><code>CONS=SNP|MNP|INS|DEL|COMPLEX|MATCH</code></li>
+</ul>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="hljs-keyword">use</span> strict;
+<span class="hljs-keyword">use</span> warnings <span class="hljs-string">FATAL =&gt;</span> <span class="hljs-string">qw[ all ]</span>;
+<span class="hljs-keyword">use</span> feature <span class="hljs-string">qw[ state say ]</span>;
+<span class="hljs-keyword">use</span> <span class="hljs-number">5.010</span>;
+
+<span class="hljs-keyword">use</span> English <span class="hljs-string">'-no_match_vars'</span>;
+<span class="hljs-keyword">use</span> Carp;
+<span class="hljs-keyword">use</span> Data::Dumper;
+
+<span class="hljs-keyword">use</span> File::Basename;
+<span class="hljs-keyword">use</span> IO::File;
+<span class="hljs-keyword">use</span> IO::Uncompress::Gunzip <span class="hljs-string">qw[ gunzip ]</span>;
+<span class="hljs-keyword">use</span> Vcf;
+<span class="hljs-keyword">use</span> FaSlice;
+<span class="hljs-keyword">use</span> Try::Tiny;
+<span class="hljs-keyword">use</span> AnyEvent::HTTP;
+<span class="hljs-keyword">use</span> JSON::XS <span class="hljs-string">qw[ decode_json ]</span>;
+<span class="hljs-keyword">use</span> Promises <span class="hljs-string">qw[ collect deferred ]</span>;
+
+<span class="hljs-keyword">our</span> $VERSION = <span class="hljs-number">0</span>.<span class="hljs-number">1</span>;
+
+<span class="hljs-keyword">use</span> constant <span class="hljs-string">SUCCESS =&gt;</span> <span class="hljs-number">200</span>;
+<span class="hljs-keyword">my</span> $REFERENCE;</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-3">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-3">&#182;</a>
+              </div>
+              <hr>
+<h3 id="main-program">Main program</h3>
+<p>This code is derived from
+<a href="https://github.com/vcftools/vcftools/blob/master/src/perl/vcf-convert">vcf-convert</a>
+and it retains some homology around data input and indel allele
+normalization.</p>
+
+            </div>
+            
+        </li>
+        
+        
+        <li id="section-4">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-4">&#182;</a>
+              </div>
+              <p>The only optional input is reference genome (-r) that is used to validate
+normalized indels. It is ignored while processing SNP-only VCFs.</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="hljs-keyword">my</span> $opts = parse_params();
+<span class="hljs-keyword">my</span> $vcf_in  = Vcf-&gt;new(<span class="hljs-string">fh =&gt;</span> \*STDIN);
+$vcf_in-&gt;parse_header();</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-5">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-5">&#182;</a>
+              </div>
+              <h4 id="header">Header</h4>
+
+            </div>
+            
+        </li>
+        
+        
+        <li id="section-6">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-6">&#182;</a>
+              </div>
+              <p>Version change is a paranoid precaution against the possibility of new
+annotations being incompatible with VCF 4.0.</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="hljs-keyword">shift</span> @{$vcf_in-&gt;{header_lines}}; <span class="hljs-comment"># discard the version line</span>
+<span class="hljs-keyword">my</span> $vcf_out = Vcf-&gt;new(<span class="hljs-string">version =&gt;</span> <span class="hljs-string">'4.1'</span>);</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-7">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-7">&#182;</a>
+              </div>
+              <p>Copy the input header to the output stream, inserting new INFO tag
+descriptions in front of the old ones.</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="hljs-keyword">my</span> $info_seen;
+<span class="hljs-keyword">foreach</span> <span class="hljs-keyword">my</span> $line (@{$vcf_in-&gt;{header_lines}}) {
+  <span class="hljs-keyword">if</span> ($line-&gt;{key} eq <span class="hljs-string">'INFO'</span> <span class="hljs-keyword">and</span> <span class="hljs-keyword">not</span> $info_seen) { <span class="hljs-comment"># The first INFO line</span>
+    $info_seen++;
+    $vcf_out-&gt;add_header_line({
+      <span class="hljs-string">key =&gt;</span> <span class="hljs-string">'INFO'</span>,
+      <span class="hljs-string">ID =&gt;</span> <span class="hljs-string">'AF'</span>,
+      <span class="hljs-string">Number =&gt;</span> <span class="hljs-string">'A'</span>,
+      <span class="hljs-string">Type =&gt;</span> <span class="hljs-string">'Float'</span>,
+      <span class="hljs-string">Description =&gt;</span> <span class="hljs-string">'Allele frequency from ExAC'</span>
+    });
+    $vcf_out-&gt;add_header_line({
+      <span class="hljs-string">key =&gt;</span> <span class="hljs-string">'INFO'</span>,
+      <span class="hljs-string">ID =&gt;</span> <span class="hljs-string">'ARF'</span>,
+      <span class="hljs-string">Number =&gt;</span> <span class="hljs-string">'A'</span>,
+      <span class="hljs-string">Type =&gt;</span> <span class="hljs-string">'Float'</span>,
+      <span class="hljs-string">Description =&gt;</span> <span class="hljs-string">'Percent frequencies of ALT and REF alleles'</span>
+    });
+    $vcf_out-&gt;add_header_line({
+      <span class="hljs-string">key =&gt;</span> <span class="hljs-string">'INFO'</span>,
+      <span class="hljs-string">ID =&gt;</span> <span class="hljs-string">'TYPE'</span>,
+      <span class="hljs-string">Number =&gt;</span> <span class="hljs-string">'A'</span>,
+      <span class="hljs-string">Type =&gt;</span> <span class="hljs-string">'String'</span>,
+      <span class="hljs-string">Description =&gt;</span> <span class="hljs-string">'The type of allele: SNP, MNP, INS, DEL, or COMPLEX'</span>
+    });
+  }
+  $vcf_out-&gt;add_header_line($line); <span class="hljs-comment"># The rest of the header</span>
+}
+$vcf_out-&gt;add_columns(@{$vcf_in-&gt;{columns}});
+<span class="hljs-keyword">print</span> $vcf_out-&gt;format_header();</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-8">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-8">&#182;</a>
+              </div>
+              <h4 id="data">Data</h4>
+
+            </div>
+            
+        </li>
+        
+        
+        <li id="section-9">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-9">&#182;</a>
+              </div>
+              <p>Each VCF line</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="hljs-keyword">while</span> (<span class="hljs-keyword">my</span> $x = $vcf_in-&gt;next_data_hash()) {</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-10">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-10">&#182;</a>
+              </div>
+              <p><strong>Local processing</strong></p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>  fill_genotype_defaults($x);
+  <span class="hljs-keyword">my</span> $var_info = classify_variant($x);</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-11">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-11">&#182;</a>
+              </div>
+              <p>If there is an indel, then a new set of left-aligned, minimized REF and ALT
+alleles must be computed.</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>
+  <span class="hljs-keyword">if</span> ( $var_info-&gt;{indel} ) {
+    <span class="hljs-keyword">my</span> ($map, $alt_to_mapref) = indel_maps($x, $vcf_in);</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-12">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-12">&#182;</a>
+              </div>
+              <p>Use
+<a href="http://search.cpan.org/dist/VCF-1.0/lib/VCF/V4_0.pm#fill_ref_alt_mapping">Vcf::fill_ref_alt_mapping()</a>
+to find the minimal reference segment containing all variants.</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>    $x-&gt;{REF} = $vcf_out-&gt;fill_ref_alt_mapping($map);
+    <span class="hljs-keyword">if</span> (<span class="hljs-keyword">not</span> <span class="hljs-keyword">defined</span> $x-&gt;{REF}) {
+      error(<span class="hljs-string">"Failed on line $x-&gt;{CHROM}:$x-&gt;{POS}"</span>);
+    }
+
+    <span class="hljs-keyword">for</span> <span class="hljs-keyword">my</span> $i (<span class="hljs-number">0</span> .. @{$x-&gt;{ALT}} - <span class="hljs-number">1</span>) {
+      <span class="hljs-keyword">my</span> $orig_ref = $alt_to_mapref-&gt;{$x-&gt;{ALT}[$i]}<span class="hljs-string">{ref}</span>;
+      <span class="hljs-keyword">my</span> $orig_alt = $alt_to_mapref-&gt;{$x-&gt;{ALT}[$i]}<span class="hljs-string">{alt}</span>;
+      $x-&gt;{ALT}[$i] = $map-&gt;{$orig_ref}{$orig_alt};
+    }
+  }</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-13">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-13">&#182;</a>
+              </div>
+              <p><strong>Fetch consequence predictions from ExAC</strong></p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>  <span class="hljs-keyword">my</span> $transaction = AnyEvent-&gt;condvar;</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-14">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-14">&#182;</a>
+              </div>
+              <p>Make a separate request for each allele and lump them in a single promise</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>  collect (
+    <span class="hljs-keyword">map</span> { <span class="hljs-comment"># make a list of promises</span>
+      retrieve ( <span class="hljs-string">"http://exac.hms.harvard.edu/rest/variant/$_"</span> )
+    } @{$var_info-&gt;{allele}}
+  )-&gt;then (</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-15">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-15">&#182;</a>
+              </div>
+              <p>send all fulfilled promises to consumer</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>    <span class="hljs-function"><span class="hljs-keyword">sub</span> </span>{
+      $transaction-&gt;<span class="hljs-keyword">send</span>(\@_);
+    },
+
+    <span class="hljs-function"><span class="hljs-keyword">sub</span> </span>{ $transaction-&gt;croak( <span class="hljs-string">'ERROR'</span> ) }
+  );</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-16">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-16">&#182;</a>
+              </div>
+              <p>Block until all of this variant’s allele-specific requests have received a
+response. Extract allele data from each response and hang it on to
+<code>$var_info</code> produced by initial variant classification.</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>  <span class="hljs-keyword">my</span> $responses = $transaction-&gt;<span class="hljs-keyword">recv</span>;
+  <span class="hljs-keyword">foreach</span> <span class="hljs-keyword">my</span> $allele ( <span class="hljs-keyword">map</span> {$_-&gt;[<span class="hljs-number">0</span>]} @{$responses} ) {
+    <span class="hljs-keyword">if</span> ( $allele-&gt;{any_covered} <span class="hljs-keyword">and</span> $allele-&gt;{variant}-&gt;{variant_id} ) {
+      <span class="hljs-keyword">say</span> $allele-&gt;{variant}-&gt;{variant_id};
+      <span class="hljs-keyword">push</span> @{$var_info-&gt;{allele_freq}}, <span class="hljs-keyword">sprintf</span> <span class="hljs-string">'%7.5f'</span>, $allele-&gt;{variant}-&gt;{allele_freq};  <span class="hljs-comment">### 2 ###</span>
+
+      <span class="hljs-keyword">say</span> $allele-&gt;{variant}-&gt;{allele_count};
+      <span class="hljs-keyword">say</span> $allele-&gt;{variant}-&gt;{allele_num};
+      <span class="hljs-keyword">say</span> <span class="hljs-keyword">join</span> <span class="hljs-string">q{,}</span>, @{$allele-&gt;{variant}-&gt;{genes}};
+      <span class="hljs-keyword">say</span> <span class="hljs-keyword">join</span> <span class="hljs-string">q{,}</span>, <span class="hljs-keyword">map</span> {$_-&gt;{major_consequence}} @{$allele-&gt;{variant}-&gt;{vep_annotations}};
+    }
+    <span class="hljs-keyword">else</span> {
+    }
+  }</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-17">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-17">&#182;</a>
+              </div>
+              <p><strong>Add annotations and write the augmented variant</strong></p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>  $x-&gt;{INFO}-&gt;{TYPE} = <span class="hljs-keyword">join</span> <span class="hljs-string">q{,}</span>, @{$var_info-&gt;{type}};  <span class="hljs-comment">### 1 ###</span>
+
+  <span class="hljs-keyword">my</span> @ratio;
+  <span class="hljs-keyword">my</span> $total_cov = $x-&gt;{INFO}-&gt;{TC};
+  <span class="hljs-keyword">foreach</span> <span class="hljs-keyword">my</span> $alt_cov (<span class="hljs-keyword">split</span> <span class="hljs-regexp">/,/</span>, $x-&gt;{INFO}-&gt;{TR}) {
+    <span class="hljs-keyword">my</span> $percent_alt = <span class="hljs-keyword">sprintf</span> <span class="hljs-string">"%5.3f"</span>, <span class="hljs-number">100.0</span> * $alt_cov / $total_cov;
+    <span class="hljs-keyword">my</span> $percent_ref = <span class="hljs-keyword">sprintf</span> <span class="hljs-string">"%5.3f"</span>, <span class="hljs-number">100.0</span> * ($total_cov - $alt_cov) / $total_cov;
+    <span class="hljs-keyword">push</span> @ratio, <span class="hljs-string">"$percent_alt:$percent_ref"</span>;
+  }
+  $x-&gt;{INFO}-&gt;{ARF} = <span class="hljs-keyword">join</span> <span class="hljs-string">q{,}</span>, @ratio;  <span class="hljs-comment">### 4 ###</span>
+
+  <span class="hljs-keyword">if</span> (<span class="hljs-keyword">exists</span> $var_info-&gt;{allele_freq}) {
+    $x-&gt;{INFO}-&gt;{AF} = <span class="hljs-keyword">join</span> <span class="hljs-string">q{,}</span>, @{$var_info-&gt;{allele_freq}};
+  }
+
+  <span class="hljs-keyword">print</span> $vcf_out-&gt;format_line($x);
+
+} <span class="hljs-comment"># next_data_hash()</span></pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-18">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-18">&#182;</a>
+              </div>
+              <hr>
+<h3 id="functions">Functions</h3>
+
+            </div>
+            
+        </li>
+        
+        
+        <li id="section-19">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-19">&#182;</a>
+              </div>
+              <p><strong>fill_genottype_defaults($var)</strong></p>
+<p>Add default FORMAT values not present in the input VCF</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="hljs-function"><span class="hljs-keyword">sub</span> <span class="hljs-title">fill_genotype_defaults</span> </span>{
+  <span class="hljs-keyword">my</span> $var = <span class="hljs-keyword">shift</span>;</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-20">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-20">&#182;</a>
+              </div>
+              <p>This function’s body was copied from
+<a href="https://github.com/vcftools/vcftools/blob/master/src/perl/vcf-convert">vcf-convert</a>.</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>  <span class="hljs-keyword">for</span> <span class="hljs-keyword">my</span> $gt (<span class="hljs-keyword">values</span> %{$var-&gt;{gtypes}}) {
+    <span class="hljs-keyword">for</span> <span class="hljs-keyword">my</span> $field (@{$var-&gt;{FORMAT}}) {</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-21">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-21">&#182;</a>
+              </div>
+              <p>Skip the GT tag, so that ploidy information is not lost (<code>./.</code> would become <code>.</code>)</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>      <span class="hljs-keyword">next</span> <span class="hljs-keyword">if</span> $field eq <span class="hljs-string">'GT'</span>;
+
+      <span class="hljs-keyword">if</span> ( $field eq <span class="hljs-string">'FT'</span> <span class="hljs-keyword">and</span> $gt-&gt;{$field} eq $vcf_in-&gt;{filter_passed}) {
+        $gt-&gt;{$field} = $vcf_out-&gt;{filter_passed};
+      }
+
+      <span class="hljs-keyword">if</span> (
+        <span class="hljs-keyword">exists</span> $vcf_in-&gt;{defaults}{$field} <span class="hljs-keyword">and</span>
+        $vcf_in-&gt;{defaults}{$field} eq $gt-&gt;{$field}
+      ) {
+        $gt-&gt;{$field} = $vcf_out-&gt;{defaults}{$field};
+        <span class="hljs-keyword">next</span>;
+      }
+
+      <span class="hljs-keyword">if</span> (
+        <span class="hljs-keyword">exists</span> $gt-&gt;{$field} <span class="hljs-keyword">and</span>
+        <span class="hljs-keyword">exists</span> $vcf_in-&gt;{header}<span class="hljs-string">{FORMAT}</span>{$field}<span class="hljs-string">{default}</span> <span class="hljs-keyword">and</span>
+        $vcf_in-&gt;{header}<span class="hljs-string">{FORMAT}</span>{$field}<span class="hljs-string">{default}</span> eq $gt-&gt;{$field}
+      ) {
+        <span class="hljs-keyword">delete</span> $gt-&gt;{$field};
+      }
+    }
+  }
+
+  <span class="hljs-keyword">return</span> <span class="hljs-number">1</span>;
+}</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-22">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-22">&#182;</a>
+              </div>
+              <hr>
+<p><strong>classify_variant($var)</strong></p>
+<p>Parse the ALT column and see if there are indels. To allow uniform treatment
+of mono-allelic and multi-allelic variants, return allele IDs (suitable for
+ExAC queries) and variant types as arrays.</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="hljs-function"><span class="hljs-keyword">sub</span> <span class="hljs-title">classify_variant</span> </span>{
+  <span class="hljs-keyword">my</span> $var = <span class="hljs-keyword">shift</span>;
+  <span class="hljs-keyword">my</span> $info = {
+    <span class="hljs-string">allele =&gt;</span> [],
+    <span class="hljs-string">type =&gt;</span> [],
+  };</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-23">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-23">&#182;</a>
+              </div>
+              <p>This function’s body is derived from
+<a href="https://github.com/vcftools/vcftools/blob/master/src/perl/vcf-convert">vcf-convert</a>.</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>  <span class="hljs-keyword">for</span> <span class="hljs-keyword">my</span> $alt (@{$var-&gt;{ALT}}) {
+    <span class="hljs-keyword">my</span> ($type, $len, $ht) = $vcf_in-&gt;event_type($var, $alt);
+
+    <span class="hljs-keyword">push</span> @{$info-&gt;{allele}}, <span class="hljs-string">"$var-&gt;{CHROM}-$var-&gt;{POS}-$var-&gt;{REF}-$alt"</span>;
+
+    <span class="hljs-keyword">if</span> ( $type eq <span class="hljs-string">'s'</span> ) {
+      <span class="hljs-keyword">if</span> ($len == <span class="hljs-number">1</span>) {
+        <span class="hljs-keyword">push</span> @{$info-&gt;{type}}, <span class="hljs-string">'SNP'</span>;
+      }
+      <span class="hljs-keyword">else</span> {
+        <span class="hljs-keyword">if</span> (<span class="hljs-keyword">length</span> $var-&gt;{REF} == <span class="hljs-keyword">length</span> $alt <span class="hljs-keyword">and</span> <span class="hljs-keyword">length</span> $alt == $len) {
+          <span class="hljs-keyword">push</span> @{$info-&gt;{type}}, <span class="hljs-string">'MNP'</span>;
+        }
+        <span class="hljs-keyword">else</span> {
+          <span class="hljs-keyword">push</span> @{$info-&gt;{type}}, <span class="hljs-string">'COMPLEX'</span>;
+        }
+      }
+      <span class="hljs-keyword">next</span>;
+    }
+
+    <span class="hljs-keyword">if</span> ( $type eq <span class="hljs-string">'r'</span> ) {
+      <span class="hljs-keyword">push</span> @{$info-&gt;{type}}, <span class="hljs-string">'MATCH'</span>;
+      <span class="hljs-keyword">next</span>;
+    }
+
+    <span class="hljs-keyword">if</span> ( $type <span class="hljs-keyword">ne</span> <span class="hljs-string">'i'</span> ) {
+      error(<span class="hljs-string">"FIXME: expected indel at $var-&gt;{CHROM}:$var-&gt;{POS}"</span>);
+    }
+
+    <span class="hljs-keyword">if</span> ($len &gt; <span class="hljs-number">0</span>) {
+      <span class="hljs-keyword">push</span> @{$info-&gt;{type}}, <span class="hljs-string">'INS'</span>;
+    }
+    <span class="hljs-keyword">else</span> {
+      <span class="hljs-keyword">push</span> @{$info-&gt;{type}}, <span class="hljs-string">'DEL'</span>;
+    }
+
+    $info-&gt;{indel}++;
+
+  } <span class="hljs-comment"># each ALT allele</span>
+
+  <span class="hljs-keyword">return</span> $info;
+} <span class="hljs-comment"># classify_variant()</span></pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-24">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-24">&#182;</a>
+              </div>
+              <hr>
+<p><strong>indel_maps($var, $input_vcf)</strong> -&gt; $map, $alt_to_mapref</p>
+<p>Prepare a couple maps to unify REF and ALT alleles with
+<a href="http://search.cpan.org/dist/VCF-1.0/lib/VCF/V4_0.pm#fill_ref_alt_mapping">Vcf::fill_ref_alt_mapping()</a>.</p>
+<p>For example, for the variant <code>CTGTGTG -&gt; C,CTG</code> the maps are constructed as:</p>
+<pre><code>$map = {<span class="hljs-string">CTG =&gt;</span> {<span class="hljs-string">C =&gt;</span> <span class="hljs-number">1</span>}, <span class="hljs-string">CTGTG =&gt;</span> {<span class="hljs-string">C =&gt;</span> <span class="hljs-number">1</span>}}
+$alt_to_mapref = {
+  <span class="hljs-string">CTG =&gt;</span> {<span class="hljs-string">ref =&gt;</span> CTG, <span class="hljs-string">alt =&gt;</span> C},
+  <span class="hljs-string">C =&gt;</span> {<span class="hljs-string">ref =&gt;</span> CTGTG, <span class="hljs-string">alt =&gt;</span> C}
+}
+</code></pre><p>This function’s body was copied (with modifications) from
+<a href="https://github.com/vcftools/vcftools/blob/master/src/perl/vcf-convert">vcf-convert</a>.</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="hljs-function"><span class="hljs-keyword">sub</span> <span class="hljs-title">indel_maps</span> </span>{
+  <span class="hljs-keyword">my</span> ($var, $input_vcf) = @_;
+  <span class="hljs-keyword">my</span> $map = {};
+  <span class="hljs-keyword">my</span> $alt_to_mapref = {};
+
+  <span class="hljs-keyword">for</span> <span class="hljs-keyword">my</span> $alt (@{$var-&gt;{ALT}}) {
+    <span class="hljs-keyword">my</span> ($type, $len, $ht) = $input_vcf-&gt;event_type($var, $alt);
+    <span class="hljs-keyword">if</span> ( $type eq <span class="hljs-string">'s'</span> <span class="hljs-keyword">or</span> $type eq <span class="hljs-string">'r'</span> ) { <span class="hljs-comment"># SNP / MATCH</span>
+      $alt_to_mapref-&gt;{$alt} = {<span class="hljs-string">ref =&gt;</span> $var-&gt;{REF}, <span class="hljs-string">alt =&gt;</span> $alt};
+      $map-&gt;{$var-&gt;{REF}}{$alt} = <span class="hljs-number">1</span>;
+      <span class="hljs-keyword">next</span>;
+    }
+
+    <span class="hljs-keyword">if</span> ( $type eq <span class="hljs-string">'i'</span> <span class="hljs-keyword">and</span> $len &gt; <span class="hljs-number">0</span> ) { <span class="hljs-comment"># INS</span>
+      <span class="hljs-keyword">my</span> $tmp = $var-&gt;{REF}.$ht;
+      $alt_to_mapref-&gt;{$alt} = {<span class="hljs-string">ref =&gt;</span> $var-&gt;{REF}, <span class="hljs-string">alt =&gt;</span> $tmp};
+      $map-&gt;{$var-&gt;{REF}}{$tmp} = <span class="hljs-number">1</span>;
+      <span class="hljs-keyword">next</span>;
+    }
+    <span class="hljs-keyword">elsif</span> ( $type eq <span class="hljs-string">'i'</span> <span class="hljs-keyword">and</span> $len &lt; <span class="hljs-number">0</span> ) { <span class="hljs-comment"># DEL</span>
+      <span class="hljs-keyword">if</span> ( <span class="hljs-keyword">not</span> $REFERENCE ) {
+        <span class="hljs-keyword">if</span> ( <span class="hljs-keyword">not</span> $opts-&gt;{refseq} ) {
+          error(<span class="hljs-string">'Indels present, missing the -r option.'</span>);
+        }
+        $REFERENCE = FaSlice-&gt;new(<span class="hljs-string">file =&gt;</span> $opts-&gt;{refseq}, <span class="hljs-string">size =&gt;</span> <span class="hljs-number">1_000_000</span>);
+      }
+      <span class="hljs-keyword">my</span> $ref   = $REFERENCE-&gt;get_slice($var-&gt;{CHROM}, $var-&gt;{POS}, $var-&gt;{POS} + <span class="hljs-keyword">abs</span> $len);
+      <span class="hljs-keyword">my</span> $nref1 = <span class="hljs-keyword">uc</span> <span class="hljs-keyword">substr</span> $ref, <span class="hljs-number">0</span>, <span class="hljs-number">1</span>;
+      <span class="hljs-keyword">my</span> $oref1 = <span class="hljs-keyword">uc</span> <span class="hljs-keyword">substr</span> $var-&gt;{REF}, <span class="hljs-number">0</span>, <span class="hljs-number">1</span>;
+
+      <span class="hljs-keyword">if</span> ( $oref1 <span class="hljs-keyword">ne</span> $nref1 ) { <span class="hljs-comment"># Sanity check</span>
+        error(<span class="hljs-string">"Sanity check failed: the ref does not agree at $var-&gt;{CHROM}:$var-&gt;{POS} .. [$nref1] in .fa,  [$oref1] in .vcf"</span>);
+      }
+
+      $alt_to_mapref-&gt;{$alt} = { <span class="hljs-string">ref =&gt;</span> $ref, <span class="hljs-string">alt =&gt;</span> $nref1 };
+      $map-&gt;{$ref}{$nref1} = <span class="hljs-number">1</span>;
+      <span class="hljs-keyword">next</span>;
+    }
+    <span class="hljs-keyword">else</span> { <span class="hljs-comment"># Unknown variant type</span>
+      error(<span class="hljs-string">"Uh, FIXME: $var-&gt;{CHROM}:$var-&gt;{POS} [$type] [$len] [$ht]"</span>);
+    }
+  } <span class="hljs-comment"># each allele</span>
+
+  <span class="hljs-keyword">return</span> ($map, $alt_to_mapref);
+}</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-25">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-25">&#182;</a>
+              </div>
+              <hr>
+<p><strong>retrieve($uri)</strong></p>
+<p>Launch a web fetch request a URI. Return a promise to deliver a decoded
+JSON response.</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="hljs-function"><span class="hljs-keyword">sub</span> <span class="hljs-title">retrieve</span> </span>{
+  <span class="hljs-keyword">my</span> ($uri) = @_;
+  <span class="hljs-keyword">my</span> $d = deferred;
+  http_get $uri =&gt; <span class="hljs-function"><span class="hljs-keyword">sub</span> </span>{
+    <span class="hljs-keyword">my</span> ($body, $header) = @_;
+    <span class="hljs-keyword">my</span> $data;
+    <span class="hljs-keyword">if</span> ($header-&gt;{Status} == SUCCESS) {</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-26">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-26">&#182;</a>
+              </div>
+              <p>Handle exceptions caused by non-JSON responses.</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>      try {</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-27">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-27">&#182;</a>
+              </div>
+              <p>The server is set to gzip large response bodies</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>        <span class="hljs-keyword">if</span> ($header-&gt;{<span class="hljs-string">'content-encoding'</span>} <span class="hljs-keyword">and</span> $header-&gt;{<span class="hljs-string">'content-encoding'</span>} eq <span class="hljs-string">'gzip'</span>) {
+          <span class="hljs-keyword">my</span> $buffer;
+          gunzip \$body =&gt; \$buffer;
+          $body = $buffer;
+        }</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-28">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-28">&#182;</a>
+              </div>
+              <p>HTML is returned in response to bad requests. Also, variants in
+unlocalized contigs are greeted with a “Page not found” HTML
+response.</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>        <span class="hljs-keyword">if</span> (<span class="hljs-keyword">index</span>($body, <span class="hljs-string">'&lt;!doctype html&gt;'</span>) &gt;= <span class="hljs-number">0</span>) {
+          $data = {<span class="hljs-string">any_covered =&gt;</span> <span class="hljs-keyword">undef</span>};
+        }</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-29">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-29">&#182;</a>
+              </div>
+              <p>Success</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>        <span class="hljs-keyword">else</span> {
+          $data = decode_json($body);
+        }
+      }
+      catch {
+        <span class="hljs-keyword">say</span> {*STDERR} <span class="hljs-string">"$_ in response from $uri"</span>;
+
+        <span class="hljs-keyword">my</span> $fh = IO::File-&gt;new(<span class="hljs-string">'bad-response.dump'</span>, <span class="hljs-string">'&gt;'</span>);
+        <span class="hljs-keyword">if</span> (<span class="hljs-keyword">defined</span> $fh) {
+          <span class="hljs-keyword">print</span> {$fh} Data::Dumper-&gt;Dump([$header, $body], [<span class="hljs-string">qw(header body)</span>]);
+          $fh-&gt;<span class="hljs-keyword">close</span>;
+        }
+
+        $d-&gt;reject();
+      };</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-30">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-30">&#182;</a>
+              </div>
+              <p>say STDERR Dumper($data);</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>
+      $d-&gt;resolve($data);
+    }
+    <span class="hljs-keyword">else</span> {
+      $d-&gt;reject( $body );
+    }
+  };
+
+  <span class="hljs-keyword">return</span> $d-&gt;promise;
+}</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-31">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-31">&#182;</a>
+              </div>
+              <hr>
+<h2 id="utility-functions">Utility functions</h2>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="hljs-function"><span class="hljs-keyword">sub</span> <span class="hljs-title">usage</span> </span>{
+  <span class="hljs-keyword">my</span> $self = basename $PROGRAM_NAME;
+
+  <span class="hljs-keyword">say</span> {*STDERR} &lt;&lt;<span class="hljs-string">"END"</span>;
+  $self v$VERSION: add variation type <span class="hljs-keyword">and</span> depth annotations; add consequence predictions from ExAC
+
+  Usage: cat in.vcf | $self [OPTIONS] &gt; out.vcf
+  Options:
+     -r, --refse<span class="hljs-string">q &lt;file&gt;</span>    The reference sequence in samtools faindexed fasta file (<span class="hljs-keyword">not</span> required with SNPs only)
+     -h, -?, --help         This help message
+END
+
+  <span class="hljs-keyword">return</span> <span class="hljs-number">1</span>;
+}
+
+<span class="hljs-function"><span class="hljs-keyword">sub</span> <span class="hljs-title">error</span> </span>{
+  <span class="hljs-keyword">my</span> $msg = <span class="hljs-keyword">shift</span>;
+  croak $msg <span class="hljs-keyword">if</span> $msg;
+  usage();
+  <span class="hljs-keyword">exit</span> <span class="hljs-number">1</span>;
+}
+
+<span class="hljs-function"><span class="hljs-keyword">sub</span> <span class="hljs-title">parse_params</span> </span>{
+  <span class="hljs-keyword">my</span> $o = {};
+  <span class="hljs-keyword">while</span> (<span class="hljs-keyword">my</span> $arg = <span class="hljs-keyword">shift</span> @ARGV) {
+    <span class="hljs-keyword">if</span> ( $arg eq <span class="hljs-string">'-r'</span> <span class="hljs-keyword">or</span> $arg eq <span class="hljs-string">'--refseq'</span> ) {
+      $o-&gt;{refseq} = <span class="hljs-keyword">shift</span> @ARGV;
+      <span class="hljs-keyword">next</span>;
+    }
+
+    <span class="hljs-keyword">if</span> ($arg eq <span class="hljs-string">q{-?}</span> <span class="hljs-keyword">or</span> $arg eq <span class="hljs-string">'-h'</span> <span class="hljs-keyword">or</span> $arg eq <span class="hljs-string">'--help'</span>) {
+      usage();
+      <span class="hljs-keyword">exit</span> <span class="hljs-number">1</span>;
+    }
+
+    error(<span class="hljs-string">"Unknown parameter \"$arg\". Run with -h for help."</span>);
+  }
+
+  <span class="hljs-keyword">return</span> $o;
+}</pre></div></div>
+            
+        </li>
+        
+    </ul>
+  </div>
+</body>
+</html>

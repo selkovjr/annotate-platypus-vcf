@@ -16,7 +16,7 @@ multi-allelic variants that are queried with asynchronous
 [Promises](https://github.com/stevan/promises-perl).
 
 For ease of deployment, all annotation and utility code is contained in a
-single file. For a detailed description, please see [Annotated code
+single file. For details, please see the [annotated code
 (Docco)](https://cdn.rawgit.com/selkovjr/annotate-platypus-vcf/master/docs/annotate-platypus-vcf.html).
 
 ## Usage

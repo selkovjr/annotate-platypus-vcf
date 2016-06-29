@@ -49,10 +49,10 @@
 <ul>
 <li>Variant type: <code>TYPE=SNP|MNP|INS|DEL|COMPLEX|MATCH</code></li>
 <li>Allele frequency: <code>AF=[0.0..1.0]</code></li>
-<li>Alt-Ref percent frequencies: <code>ARF=[0.0..100.0]:[0.0..100.0]</code></li>
-<li>Variant effect prediction: <code>VEP=...</code></li>
+<li>ALT-REF percent frequencies: <code>ARF=[0.0..100.0]:[0.0..100.0]</code></li>
+<li>Variant effect prediction: <code>VEP=[SO term]</code> (the most adverse effect selected)</li>
 </ul>
-<p>The annotations of multiallelic variants are represented as comma-separated
+<p>The annotations for multiallelic variants are represented as comma-separated
 lists, <em>e.g.</em>, <code>AF=0.07306,;</code> (The first allele’s frequency is 0.07306; data
 not available for the second).</p>
 
@@ -76,7 +76,7 @@ not available for the second).</p>
 <span class="hljs-keyword">use</span> AnyEvent::HTTP;
 <span class="hljs-keyword">use</span> JSON::XS <span class="hljs-string">qw[ decode_json ]</span>;
 <span class="hljs-keyword">use</span> Promises <span class="hljs-string">qw[ collect deferred ]</span>;
-<span class="hljs-keyword">use</span> List::MoreUtils <span class="hljs-string">qw[ firstidx ]</span>;
+<span class="hljs-keyword">use</span> List::MoreUtils <span class="hljs-string">qw[ any ]</span>;
 
 <span class="hljs-keyword">our</span> $VERSION = <span class="hljs-number">0</span>.<span class="hljs-number">1</span>;
 
@@ -366,7 +366,7 @@ order reconstruction from <code>(@{$var_info-&gt;{allele}}</code>.</p>
 
             </div>
             
-            <div class="content"><div class='highlight'><pre>  <span class="hljs-keyword">my</span> %response = <span class="hljs-keyword">map</span> {$_-&gt;[<span class="hljs-number">0</span>]-&gt;{key}, $_-&gt;[<span class="hljs-number">0</span>]} @{$transaction-&gt;<span class="hljs-keyword">recv</span>};</pre></div></div>
+            <div class="content"><div class='highlight'><pre>  <span class="hljs-keyword">my</span> %response = <span class="hljs-keyword">map</span> {$_-&gt;[<span class="hljs-number">0</span>]-&gt;{key} =&gt; $_-&gt;[<span class="hljs-number">0</span>]} @{$transaction-&gt;<span class="hljs-keyword">recv</span>};</pre></div></div>
             
         </li>
         
@@ -391,10 +391,18 @@ order reconstruction from <code>(@{$var_info-&gt;{allele}}</code>.</p>
       <span class="hljs-keyword">say</span> $allele-&gt;{variant}-&gt;{allele_count};
       <span class="hljs-keyword">say</span> $allele-&gt;{variant}-&gt;{allele_num};
       <span class="hljs-keyword">say</span> <span class="hljs-keyword">join</span> <span class="hljs-string">q{,}</span>, @{$allele-&gt;{variant}-&gt;{genes}};
-      <span class="hljs-keyword">say</span> <span class="hljs-keyword">join</span> <span class="hljs-string">q{,}</span>, <span class="hljs-keyword">map</span> {$_-&gt;{major_consequence}} @{$allele-&gt;{variant}-&gt;{vep_annotations}};
     }
     <span class="hljs-keyword">else</span> {
-      <span class="hljs-keyword">push</span> @{$var_info-&gt;{allele_freq}}, <span class="hljs-string">''</span>;  <span class="hljs-comment">### 2 ###</span>
+      <span class="hljs-keyword">push</span> @{$var_info-&gt;{allele_freq}}, <span class="hljs-string">q{}</span>;  <span class="hljs-comment">### 2 ###</span>
+    }
+
+    <span class="hljs-keyword">if</span> ( $allele-&gt;{any_covered} <span class="hljs-keyword">and</span> <span class="hljs-keyword">exists</span> $allele-&gt;{variant}-&gt;{vep_annotations}) {
+      <span class="hljs-keyword">push</span> @{$var_info-&gt;{vep}}, VEP::Severity::most_adverse(
+        <span class="hljs-keyword">map</span> {$_-&gt;{major_consequence}} @{$allele-&gt;{variant}-&gt;{vep_annotations}}
+      );
+    }
+    <span class="hljs-keyword">else</span> {
+      <span class="hljs-keyword">push</span> @{$var_info-&gt;{allele_freq}}, <span class="hljs-string">q{}</span>;  <span class="hljs-comment">### 2 ###</span>
     }
   }</pre></div></div>
             
@@ -435,8 +443,12 @@ order reconstruction from <code>(@{$var_info-&gt;{allele}}</code>.</p>
 
             </div>
             
-            <div class="content"><div class='highlight'><pre>  <span class="hljs-keyword">if</span> (<span class="hljs-keyword">grep</span> {$_} @{$var_info-&gt;{allele_freq}}) {
+            <div class="content"><div class='highlight'><pre>  <span class="hljs-keyword">if</span> (any {$_} @{$var_info-&gt;{allele_freq}}) {
     $x-&gt;{INFO}-&gt;{AF} = <span class="hljs-keyword">join</span> <span class="hljs-string">q{,}</span>, @{$var_info-&gt;{allele_freq}};
+  }
+
+  <span class="hljs-keyword">if</span> (any {$_} @{$var_info-&gt;{vep}}) {
+    $x-&gt;{INFO}-&gt;{VEP} = <span class="hljs-keyword">join</span> <span class="hljs-string">q{,}</span>, @{$var_info-&gt;{vep}};
   }
 
   <span class="hljs-keyword">print</span> $vcf_out-&gt;format_line($x);
@@ -878,6 +890,299 @@ END
 
   <span class="hljs-keyword">return</span> $o;
 }</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-35">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-35">&#182;</a>
+              </div>
+              <hr>
+<h3 id="modules">Modules</h3>
+
+            </div>
+            
+        </li>
+        
+        
+        <li id="section-36">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-36">&#182;</a>
+              </div>
+              <p><strong>VEP::Severity</strong></p>
+<p>Provide data and a method for selecting the most sever variant
+effect prediction.</p>
+<p>The data in the ExAC response (<code>vep_annotations</code>) appear to be sorted by
+severity, but anyway. Better be paranoid.</p>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="hljs-keyword">package</span> VEP::Severity;
+
+<span class="hljs-keyword">our</span> (@data, %order);
+
+BEGIN {
+  @data = (
+    [
+      <span class="hljs-string">'transcript_ablation'</span>,
+      <span class="hljs-string">q{A feature ablation whereby the deleted region includes a transcript feature}</span>,
+      <span class="hljs-string">'SO:0001893'</span>,
+      <span class="hljs-string">'Transcript ablation'</span>,
+      <span class="hljs-string">'HIGH'</span>
+    ],
+    [
+      <span class="hljs-string">'splice_acceptor_variant'</span>,
+      <span class="hljs-string">q{A splice variant that changes the 2 base region at the 3' end of an intron}</span>,
+      <span class="hljs-string">'SO:0001574'</span>,
+      <span class="hljs-string">'Splice acceptor variant'</span>,
+      <span class="hljs-string">'HIGH'</span>
+    ],
+    [<span class="hljs-string">'splice_donor_variant'</span>,
+      <span class="hljs-string">q{A splice variant that changes the 2 base region at the 5' end of an intron}</span>,
+      <span class="hljs-string">'SO:0001575'</span>,
+      <span class="hljs-string">'Splice donor variant'</span>,
+      <span class="hljs-string">'HIGH'</span>
+    ],
+    [<span class="hljs-string">'stop_gained'</span>,
+      <span class="hljs-string">q{A sequence variant whereby at least one base of a codon is changed, resulting in a premature stop codon, leading to a shortened transcript}</span>,
+      <span class="hljs-string">'SO:0001587'</span>,
+      <span class="hljs-string">'Stop gained'</span>,
+      <span class="hljs-string">'HIGH'</span>
+    ],
+    [
+      <span class="hljs-string">'frameshift_variant'</span>,
+      <span class="hljs-string">q{A sequence variant which causes a disruption of the translational reading frame, because the number of nucleotides inserted or deleted is not a multiple of three}</span>,
+      <span class="hljs-string">'SO:0001589'</span>,
+      <span class="hljs-string">'Frameshift variant'</span>,
+      <span class="hljs-string">'HIGH'</span>
+    ],
+    [<span class="hljs-string">'stop_lost'</span>,
+      <span class="hljs-string">q{A sequence variant where at least one base of the terminator codon (stop) is changed, resulting in an elongated transcript}</span>,
+      <span class="hljs-string">'SO:0001578'</span>,
+      <span class="hljs-string">'Stop lost'</span>,
+      <span class="hljs-string">'HIGH'</span>
+    ],
+    [<span class="hljs-string">'start_lost'</span>,
+      <span class="hljs-string">q{A codon variant that changes at least one base of the canonical start codo}</span>,
+      <span class="hljs-string">'SO:0002012'</span>,
+      <span class="hljs-string">'Start lost'</span>,
+      <span class="hljs-string">'HIGH'</span>
+    ],
+    [
+      <span class="hljs-string">'transcript_amplification'</span>,
+      <span class="hljs-string">q{A feature amplification of a region containing a transcript}</span>,
+      <span class="hljs-string">'SO:0001889'</span>,
+      <span class="hljs-string">'Transcript amplification'</span>,
+      <span class="hljs-string">'HIGH'</span>
+    ],
+    [
+      <span class="hljs-string">'inframe_insertion'</span>,
+      <span class="hljs-string">q{An inframe non synonymous variant that inserts bases into in the coding sequenc}</span>,
+      <span class="hljs-string">'SO:0001821'</span>,
+      <span class="hljs-string">'Inframe insertion'</span>,
+      <span class="hljs-string">'MODERATE'</span>
+    ],
+    [
+      <span class="hljs-string">'inframe_deletion'</span>,
+      <span class="hljs-string">q{An inframe non synonymous variant that deletes bases from the coding sequenc}</span>,
+      <span class="hljs-string">'SO:0001822'</span>,
+      <span class="hljs-string">'Inframe deletion'</span>,
+      <span class="hljs-string">'MODERATE'</span>
+    ],
+    [
+      <span class="hljs-string">'missense_variant'</span>,
+      <span class="hljs-string">q{A sequence variant, that changes one or more bases, resulting in a different amino acid sequence but where the length is preserved}</span>,
+      <span class="hljs-string">'SO:0001583'</span>,
+      <span class="hljs-string">'Missense variant'</span>,
+      <span class="hljs-string">'MODERATE'</span>
+    ],
+    [
+      <span class="hljs-string">'protein_altering_variant'</span>,
+      <span class="hljs-string">q{A sequence_variant which is predicted to change the protein encoded in the coding sequence}</span>,
+      <span class="hljs-string">'SO:0001818'</span>,
+      <span class="hljs-string">'Protein altering variant'</span>,
+      <span class="hljs-string">'MODERATE'</span>
+    ],
+    [
+      <span class="hljs-string">'splice_region_variant'</span>,
+      <span class="hljs-string">q{A sequence variant in which a change has occurred within the region of the splice site, either within 1-3 bases of the exon or 3-8 bases of the intron}</span>,
+      <span class="hljs-string">'SO:0001630'</span>,
+      <span class="hljs-string">'Splice region variant'</span>,
+      <span class="hljs-string">'LOW'</span>
+    ],
+    [
+      <span class="hljs-string">'incomplete_terminal_codon_variant'</span>,
+      <span class="hljs-string">q{A sequence variant where at least one base of the final codon of an incompletely annotated transcript is changed}</span>,
+      <span class="hljs-string">'SO:0001626'</span>,
+      <span class="hljs-string">'Incomplete terminal codon variant'</span>,
+      <span class="hljs-string">'LOW'</span>
+    ],
+    [
+      <span class="hljs-string">'stop_retained_variant'</span>,
+      <span class="hljs-string">q{A sequence variant where at least one base in the terminator codon is changed, but the terminator remains}</span>,
+      <span class="hljs-string">'SO:0001567'</span>,
+      <span class="hljs-string">'Stop retained variant'</span>,
+      <span class="hljs-string">'LOW'</span>
+    ],
+    [
+      <span class="hljs-string">'synonymous_variant'</span>,
+      <span class="hljs-string">q{A sequence variant where there is no resulting change to the encoded amino acid}</span>,
+      <span class="hljs-string">'SO:0001819'</span>,
+      <span class="hljs-string">'Synonymous variant'</span>,
+      <span class="hljs-string">'LOW'</span>
+    ],
+    [
+      <span class="hljs-string">'coding_sequence_variant'</span>,
+      <span class="hljs-string">q{A sequence variant that changes the coding sequence}</span>,
+      <span class="hljs-string">'SO:0001580'</span>,
+      <span class="hljs-string">'Coding sequence variant'</span>,
+      <span class="hljs-string">'MODIFIER'</span>
+    ],
+    [
+      <span class="hljs-string">'mature_miRNA_variant'</span>,
+      <span class="hljs-string">q{A transcript variant located with the sequence of the mature miRNA}</span>,
+      <span class="hljs-string">'SO:0001620'</span>,
+      <span class="hljs-string">'Mature miRNA variant'</span>,
+      <span class="hljs-string">'MODIFIER'</span>
+    ],
+    [
+      <span class="hljs-string">'5_prime_UTR_variant'</span>,
+      <span class="hljs-string">q{A UTR variant of the 5' UTR}</span>,
+      <span class="hljs-string">'SO:0001623'</span>,
+      <span class="hljs-string">'5 prime UTR variant'</span>,
+      <span class="hljs-string">'MODIFIER'</span>
+    ],
+    [
+      <span class="hljs-string">'3_prime_UTR_variant'</span>,
+      <span class="hljs-string">q{A UTR variant of the 3' UTR}</span>,
+      <span class="hljs-string">'SO:0001624'</span>,
+      <span class="hljs-string">'3 prime UTR variant'</span>,
+      <span class="hljs-string">'MODIFIER'</span>
+    ],
+    [
+      <span class="hljs-string">'non_coding_transcript_exon_variant'</span>, <span class="hljs-string">q{A sequence variant that changes non-coding exon sequence in a non-coding transcript}</span>,
+      <span class="hljs-string">'SO:0001792'</span>,
+      <span class="hljs-string">'Non coding transcript exon variant'</span>,
+      <span class="hljs-string">'MODIFIER'</span>
+    ],
+    [
+      <span class="hljs-string">'intron_variant'</span>,
+      <span class="hljs-string">q{A transcript variant occurring within an intron}</span>,
+      <span class="hljs-string">'SO:0001627'</span>,
+      <span class="hljs-string">'Intron variant'</span>,
+      <span class="hljs-string">'MODIFIER'</span>
+    ],
+    [
+      <span class="hljs-string">'NMD_transcript_variant'</span>,
+      <span class="hljs-string">q{A variant in a transcript that is the target of NMD}</span>,
+      <span class="hljs-string">'SO:0001621'</span>,
+      <span class="hljs-string">'NMD transcript variant'</span>,
+      <span class="hljs-string">'MODIFIER'</span>
+    ],
+    [
+      <span class="hljs-string">'non_coding_transcript_variant'</span>, <span class="hljs-string">q{A transcript variant of a non coding RNA gene}</span>,
+      <span class="hljs-string">'SO:0001619'</span>,
+      <span class="hljs-string">'Non coding transcript variant'</span>,
+      <span class="hljs-string">'MODIFIER'</span>
+    ],
+    [
+      <span class="hljs-string">'upstream_gene_variant'</span>,
+      <span class="hljs-string">q{A sequence variant located 5' of a gene}</span>,
+      <span class="hljs-string">'SO:0001631'</span>,
+      <span class="hljs-string">'Upstream gene variant'</span>,
+      <span class="hljs-string">'MODIFIER'</span>
+    ],
+    [
+      <span class="hljs-string">'downstream_gene_variant'</span>,
+      <span class="hljs-string">q{A sequence variant located 3' of a gene}</span>,
+      <span class="hljs-string">'SO:0001632'</span>,
+      <span class="hljs-string">'Downstream gene variant'</span>,
+      <span class="hljs-string">'MODIFIER'</span>
+    ],
+    [
+      <span class="hljs-string">'TFBS_ablation'</span>,
+      <span class="hljs-string">q{A feature ablation whereby the deleted region includes a transcription factor binding site}</span>,
+      <span class="hljs-string">'SO:0001892'</span>,
+      <span class="hljs-string">'TFBS ablation'</span>,
+      <span class="hljs-string">'MODIFIER'</span>
+    ],
+    [
+      <span class="hljs-string">'TFBS_amplification'</span>,
+      <span class="hljs-string">q{A feature amplification of a region containing a transcription factor binding site}</span>,
+      <span class="hljs-string">'SO:0001892'</span>,
+      <span class="hljs-string">'TFBS amplification'</span>,
+      <span class="hljs-string">'MODIFIER'</span>
+    ],
+    [
+      <span class="hljs-string">'TF_binding_site_variant'</span>,
+      <span class="hljs-string">q{A sequence variant located within a transcription factor binding site}</span>,
+      <span class="hljs-string">'SO:0001782'</span>,
+      <span class="hljs-string">'TF binding site variant'</span>,
+      <span class="hljs-string">'MODIFIER'</span>
+    ],
+    [
+      <span class="hljs-string">'regulatory_region_ablation'</span>,
+      <span class="hljs-string">q{A feature ablation whereby the deleted region includes a regulatory region}</span>,
+      <span class="hljs-string">'SO:0001894'</span>,
+      <span class="hljs-string">'Regulatory region ablation'</span>,
+      <span class="hljs-string">'MODERATE'</span>
+    ],
+    [
+      <span class="hljs-string">'regulatory_region_amplification'</span>, <span class="hljs-string">q{A feature amplification of a region containing a regulatory region}</span>,
+      <span class="hljs-string">'SO:0001891'</span>,
+      <span class="hljs-string">'Regulatory region amplification'</span>,
+      <span class="hljs-string">'MODIFIER'</span>
+    ],
+    [
+      <span class="hljs-string">'feature_elongation'</span>,
+      <span class="hljs-string">q{A sequence variant located within a regulatory region}</span>,
+      <span class="hljs-string">'SO:0001907'</span>,
+      <span class="hljs-string">'Feature elongation'</span>,
+      <span class="hljs-string">'MODIFIER'</span>
+    ],
+    [
+      <span class="hljs-string">'regulatory_region_variant'</span>,
+      <span class="hljs-string">q{A sequence variant located within a regulatory region}</span>,
+      <span class="hljs-string">'SO:0001566'</span>,
+      <span class="hljs-string">'Regulatory region variant'</span>,
+      <span class="hljs-string">'MODIFIER'</span>
+    ],
+    [
+      <span class="hljs-string">'feature_truncation'</span>,
+      <span class="hljs-string">q{A sequence variant that causes the reduction of a genomic feature, with regard to the reference sequence}</span>,
+      <span class="hljs-string">'SO:0001906'</span>,
+      <span class="hljs-string">'Feature truncation'</span>,
+      <span class="hljs-string">'MODIFIER'</span>
+    ],
+    [
+      <span class="hljs-string">'intergenic_variant'</span>,
+      <span class="hljs-string">q{A sequence variant located in the intergenic region, between genes}</span>,
+      <span class="hljs-string">'SO:0001628'</span>,
+      <span class="hljs-string">'Intergenic variant'</span>, <span class="hljs-string">'MODIFIER'</span>
+    ]
+  );
+
+  %order = <span class="hljs-keyword">map</span> {$VEP::Severity::data[$_]-&gt;[<span class="hljs-number">0</span>] =&gt; $_} <span class="hljs-number">0</span> .. $#VEP::Severity::data;
+}
+
+
+<span class="hljs-function"><span class="hljs-keyword">sub</span> <span class="hljs-title">VEP</span>::<span class="hljs-title">Severity</span>::<span class="hljs-title">sort</span> </span>{
+  <span class="hljs-keyword">my</span> @list = @_;
+  <span class="hljs-keyword">return</span> <span class="hljs-keyword">wantarray</span> ? <span class="hljs-keyword">sort</span> {$VEP::Severity::order{$a} &lt;=&gt; $VEP::Severity::order{$b}} @list : <span class="hljs-keyword">undef</span>;
+}
+
+<span class="hljs-function"><span class="hljs-keyword">sub</span> <span class="hljs-title">VEP</span>::<span class="hljs-title">Severity</span>::<span class="hljs-title">most_adverse</span> </span>{
+  <span class="hljs-keyword">my</span> @list = @_;
+  <span class="hljs-keyword">my</span> @sorted = VEP::Severity::<span class="hljs-keyword">sort</span>(@list);
+  <span class="hljs-keyword">return</span> <span class="hljs-keyword">shift</span> @sorted;
+}
+
+<span class="hljs-number">1</span>;</pre></div></div>
             
         </li>
         

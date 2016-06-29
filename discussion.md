@@ -25,6 +25,11 @@ there are multiple possibilities, annotate with the most deleterious possibility
    inference and extensive database support. ExAC has it all and is a fast
    responder.
 
+   The most adverse predicted effect is annotated with the INFO tag `VEP`:
+   ```
+   VEP=splice_region_variant;
+   ```
+
    _For more up-to-date information, we could go straight to VEP, but it is
    slow and accessing it will require making a fully non-blocking loop with a
    merge buffer and complex exception handling. Doing that right will take more

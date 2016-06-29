@@ -13,7 +13,7 @@
 # * Variant type: `TYPE=SNP|MNP|INS|DEL|COMPLEX|MATCH`
 # * Allele frequency: `AF=[0.0..1.0]`
 # * ALT-REF percent frequencies: `ARF=[0.0..100.0]:[0.0..100.0]`
-# * Variant effect prediction: `VEP=...`
+# * Variant effect prediction: `VEP=[SO term]` (the most adverse effect selected)
 #
 # The annotations for multiallelic variants are represented as comma-separated
 # lists, _e.g._, `AF=0.07306,;` (The first allele's frequency is 0.07306; data
@@ -37,7 +37,7 @@ use Try::Tiny;
 use AnyEvent::HTTP;
 use JSON::XS qw[ decode_json ];
 use Promises qw[ collect deferred ];
-use List::MoreUtils qw[ firstidx ];
+use List::MoreUtils qw[ any ];
 
 our $VERSION = 0.1;
 
@@ -93,6 +93,13 @@ foreach my $line (@{$vcf_in->{header_lines}}) {
       Number => 'A',
       Type => 'String',
       Description => 'The type of allele: SNP, MNP, INS, DEL, or COMPLEX'
+    });
+    $vcf_out->add_header_line({
+      key => 'INFO',
+      ID => 'VEP',
+      Number => 'A',
+      Type => 'String',
+      Description => 'Prediction of the most severe variant effect from ExAC'
     });
   }
   $vcf_out->add_header_line($line); # The rest of the header
@@ -156,7 +163,7 @@ while (my $x = $vcf_in->next_data_hash()) {
   # Block until all of this variant's allele-specific requests have received a
   # response. Responses can come out of order, so storing them as a hash allows
   # order reconstruction from `(@{$var_info->{allele}}`.
-  my %response = map {$_->[0]->{key}, $_->[0]} @{$transaction->recv};
+  my %response = map {$_->[0]->{key} => $_->[0]} @{$transaction->recv};
 
   # Extract allele data from each response and hang it on to
   # `$var_info` produced by initial variant classification.
@@ -169,10 +176,18 @@ while (my $x = $vcf_in->next_data_hash()) {
       say $allele->{variant}->{allele_count};
       say $allele->{variant}->{allele_num};
       say join q{,}, @{$allele->{variant}->{genes}};
-      say join q{,}, map {$_->{major_consequence}} @{$allele->{variant}->{vep_annotations}};
     }
     else {
-      push @{$var_info->{allele_freq}}, '';  ### 2 ###
+      push @{$var_info->{allele_freq}}, q{};  ### 2 ###
+    }
+
+    if ( $allele->{any_covered} and exists $allele->{variant}->{vep_annotations}) {
+      push @{$var_info->{vep}}, VEP::Severity::most_adverse(
+        map {$_->{major_consequence}} @{$allele->{variant}->{vep_annotations}}
+      );
+    }
+    else {
+      push @{$var_info->{allele_freq}}, q{};  ### 2 ###
     }
   }
 
@@ -189,8 +204,12 @@ while (my $x = $vcf_in->next_data_hash()) {
   $x->{INFO}->{ARF} = join q{,}, @ratio;  ### 4 ###
 
   # Check that the array of allele frequencies has a non-null value
-  if (grep {$_} @{$var_info->{allele_freq}}) {
+  if (any {$_} @{$var_info->{allele_freq}}) {
     $x->{INFO}->{AF} = join q{,}, @{$var_info->{allele_freq}};
+  }
+
+  if (any {$_} @{$var_info->{vep}}) {
+    $x->{INFO}->{VEP} = join q{,}, @{$var_info->{vep}};
   }
 
   print $vcf_out->format_line($x);
@@ -485,5 +504,277 @@ sub parse_params {
   return $o;
 }
 
+#__________________________________________________________________
+#
+# ### Modules
+#
+
+# **VEP::Severity**
+#
+# Provide data and a method for selecting the most severe variant
+# effect prediction.
+#
+# The data in the ExAC response (`vep_annotations`) appear to be sorted by
+# severity, but anyway. Better be paranoid.
+#
+package VEP::Severity;
+
+our (@data, %order);
+
+BEGIN {
+  @data = (
+    [
+      'transcript_ablation',
+      q{A feature ablation whereby the deleted region includes a transcript feature},
+      'SO:0001893',
+      'Transcript ablation',
+      'HIGH'
+    ],
+    [
+      'splice_acceptor_variant',
+      q{A splice variant that changes the 2 base region at the 3' end of an intron},
+      'SO:0001574',
+      'Splice acceptor variant',
+      'HIGH'
+    ],
+    ['splice_donor_variant',
+      q{A splice variant that changes the 2 base region at the 5' end of an intron},
+      'SO:0001575',
+      'Splice donor variant',
+      'HIGH'
+    ],
+    ['stop_gained',
+      q{A sequence variant whereby at least one base of a codon is changed, resulting in a premature stop codon, leading to a shortened transcript},
+      'SO:0001587',
+      'Stop gained',
+      'HIGH'
+    ],
+    [
+      'frameshift_variant',
+      q{A sequence variant which causes a disruption of the translational reading frame, because the number of nucleotides inserted or deleted is not a multiple of three},
+      'SO:0001589',
+      'Frameshift variant',
+      'HIGH'
+    ],
+    ['stop_lost',
+      q{A sequence variant where at least one base of the terminator codon (stop) is changed, resulting in an elongated transcript},
+      'SO:0001578',
+      'Stop lost',
+      'HIGH'
+    ],
+    ['start_lost',
+      q{A codon variant that changes at least one base of the canonical start codo},
+      'SO:0002012',
+      'Start lost',
+      'HIGH'
+    ],
+    [
+      'transcript_amplification',
+      q{A feature amplification of a region containing a transcript},
+      'SO:0001889',
+      'Transcript amplification',
+      'HIGH'
+    ],
+    [
+      'inframe_insertion',
+      q{An inframe non synonymous variant that inserts bases into in the coding sequenc},
+      'SO:0001821',
+      'Inframe insertion',
+      'MODERATE'
+    ],
+    [
+      'inframe_deletion',
+      q{An inframe non synonymous variant that deletes bases from the coding sequenc},
+      'SO:0001822',
+      'Inframe deletion',
+      'MODERATE'
+    ],
+    [
+      'missense_variant',
+      q{A sequence variant, that changes one or more bases, resulting in a different amino acid sequence but where the length is preserved},
+      'SO:0001583',
+      'Missense variant',
+      'MODERATE'
+    ],
+    [
+      'protein_altering_variant',
+      q{A sequence_variant which is predicted to change the protein encoded in the coding sequence},
+      'SO:0001818',
+      'Protein altering variant',
+      'MODERATE'
+    ],
+    [
+      'splice_region_variant',
+      q{A sequence variant in which a change has occurred within the region of the splice site, either within 1-3 bases of the exon or 3-8 bases of the intron},
+      'SO:0001630',
+      'Splice region variant',
+      'LOW'
+    ],
+    [
+      'incomplete_terminal_codon_variant',
+      q{A sequence variant where at least one base of the final codon of an incompletely annotated transcript is changed},
+      'SO:0001626',
+      'Incomplete terminal codon variant',
+      'LOW'
+    ],
+    [
+      'stop_retained_variant',
+      q{A sequence variant where at least one base in the terminator codon is changed, but the terminator remains},
+      'SO:0001567',
+      'Stop retained variant',
+      'LOW'
+    ],
+    [
+      'synonymous_variant',
+      q{A sequence variant where there is no resulting change to the encoded amino acid},
+      'SO:0001819',
+      'Synonymous variant',
+      'LOW'
+    ],
+    [
+      'coding_sequence_variant',
+      q{A sequence variant that changes the coding sequence},
+      'SO:0001580',
+      'Coding sequence variant',
+      'MODIFIER'
+    ],
+    [
+      'mature_miRNA_variant',
+      q{A transcript variant located with the sequence of the mature miRNA},
+      'SO:0001620',
+      'Mature miRNA variant',
+      'MODIFIER'
+    ],
+    [
+      '5_prime_UTR_variant',
+      q{A UTR variant of the 5' UTR},
+      'SO:0001623',
+      '5 prime UTR variant',
+      'MODIFIER'
+    ],
+    [
+      '3_prime_UTR_variant',
+      q{A UTR variant of the 3' UTR},
+      'SO:0001624',
+      '3 prime UTR variant',
+      'MODIFIER'
+    ],
+    [
+      'non_coding_transcript_exon_variant', q{A sequence variant that changes non-coding exon sequence in a non-coding transcript},
+      'SO:0001792',
+      'Non coding transcript exon variant',
+      'MODIFIER'
+    ],
+    [
+      'intron_variant',
+      q{A transcript variant occurring within an intron},
+      'SO:0001627',
+      'Intron variant',
+      'MODIFIER'
+    ],
+    [
+      'NMD_transcript_variant',
+      q{A variant in a transcript that is the target of NMD},
+      'SO:0001621',
+      'NMD transcript variant',
+      'MODIFIER'
+    ],
+    [
+      'non_coding_transcript_variant', q{A transcript variant of a non coding RNA gene},
+      'SO:0001619',
+      'Non coding transcript variant',
+      'MODIFIER'
+    ],
+    [
+      'upstream_gene_variant',
+      q{A sequence variant located 5' of a gene},
+      'SO:0001631',
+      'Upstream gene variant',
+      'MODIFIER'
+    ],
+    [
+      'downstream_gene_variant',
+      q{A sequence variant located 3' of a gene},
+      'SO:0001632',
+      'Downstream gene variant',
+      'MODIFIER'
+    ],
+    [
+      'TFBS_ablation',
+      q{A feature ablation whereby the deleted region includes a transcription factor binding site},
+      'SO:0001892',
+      'TFBS ablation',
+      'MODIFIER'
+    ],
+    [
+      'TFBS_amplification',
+      q{A feature amplification of a region containing a transcription factor binding site},
+      'SO:0001892',
+      'TFBS amplification',
+      'MODIFIER'
+    ],
+    [
+      'TF_binding_site_variant',
+      q{A sequence variant located within a transcription factor binding site},
+      'SO:0001782',
+      'TF binding site variant',
+      'MODIFIER'
+    ],
+    [
+      'regulatory_region_ablation',
+      q{A feature ablation whereby the deleted region includes a regulatory region},
+      'SO:0001894',
+      'Regulatory region ablation',
+      'MODERATE'
+    ],
+    [
+      'regulatory_region_amplification', q{A feature amplification of a region containing a regulatory region},
+      'SO:0001891',
+      'Regulatory region amplification',
+      'MODIFIER'
+    ],
+    [
+      'feature_elongation',
+      q{A sequence variant located within a regulatory region},
+      'SO:0001907',
+      'Feature elongation',
+      'MODIFIER'
+    ],
+    [
+      'regulatory_region_variant',
+      q{A sequence variant located within a regulatory region},
+      'SO:0001566',
+      'Regulatory region variant',
+      'MODIFIER'
+    ],
+    [
+      'feature_truncation',
+      q{A sequence variant that causes the reduction of a genomic feature, with regard to the reference sequence},
+      'SO:0001906',
+      'Feature truncation',
+      'MODIFIER'
+    ],
+    [
+      'intergenic_variant',
+      q{A sequence variant located in the intergenic region, between genes},
+      'SO:0001628',
+      'Intergenic variant', 'MODIFIER'
+    ]
+  );
+
+  %order = map {$VEP::Severity::data[$_]->[0] => $_} 0 .. $#VEP::Severity::data;
+}
 
 
+sub VEP::Severity::sort {
+  my @list = @_;
+  return wantarray ? sort {$VEP::Severity::order{$a} <=> $VEP::Severity::order{$b}} @list : undef;
+}
+
+sub VEP::Severity::most_adverse {
+  my @list = @_;
+  my @sorted = VEP::Severity::sort(@list);
+  return shift @sorted;
+}
+
+1;

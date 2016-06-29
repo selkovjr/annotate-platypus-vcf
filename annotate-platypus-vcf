@@ -16,10 +16,12 @@
 # * Variant effect prediction: `VEP=[SO term]` (the most adverse effect selected)
 # * Observation counts `OBS=count/total`
 # * Known alleles at this locus: `ALL=id1,id2,...,idN`
+# * Genes: `GN=id1,id2,...,idN`
 #
-# The annotations for multiallelic variants are represented as comma-separated
-# lists, _e.g._, `AF=0.07306,;` (The first allele's frequency is 0.07306; data
-# not available for the second).
+# Except for the lists of knows alleles and genes that are unified for each
+# multiallelic variant, the annotations for multiple alleles are represented as
+# comma-separated lists, _e.g._, `AF=0.07306,;` (The first allele's frequency
+# is 0.07306; data not available for the second).
 #
 use strict;
 use warnings FATAL => qw[ all ];
@@ -95,6 +97,13 @@ foreach my $line (@{$vcf_in->{header_lines}}) {
       Number => 'A',
       Type => 'Float',
       Description => 'Percent frequencies of ALT and REF alleles'
+    });
+    $vcf_out->add_header_line({
+      key => 'INFO',
+      ID => 'GN',
+      Number => 'A',
+      Type => 'String',
+      Description => 'IDs of affecteg genes'
     });
     $vcf_out->add_header_line({
       key => 'INFO',
@@ -216,6 +225,12 @@ while (my $x = $vcf_in->next_data_hash()) {
         $var_info->{known_alleles}{$id}++;
       };
     }
+
+    if ( $allele->{any_covered} and exists $allele->{variant}->{genes}) {
+      foreach my $id (@{$allele->{variant}->{genes}}) {
+        $var_info->{genes}{$id}++;
+      };
+    }
   }
 
   # **Add annotations and write the augmented variant**
@@ -244,6 +259,10 @@ while (my $x = $vcf_in->next_data_hash()) {
 
   if ($var_info->{known_alleles}) {
     $x->{INFO}->{ALL} = join q{,}, sort keys %{$var_info->{known_alleles}};
+  }
+
+  if ($var_info->{known_alleles}) {
+    $x->{INFO}->{GN} = join q{,}, sort keys %{$var_info->{genes}};
   }
 
   print $vcf_out->format_line($x);

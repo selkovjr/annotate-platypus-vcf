@@ -53,10 +53,12 @@
 <li>Variant effect prediction: <code>VEP=[SO term]</code> (the most adverse effect selected)</li>
 <li>Observation counts <code>OBS=count/total</code></li>
 <li>Known alleles at this locus: <code>ALL=id1,id2,...,idN</code></li>
+<li>Genes: <code>GN=id1,id2,...,idN</code></li>
 </ul>
-<p>The annotations for multiallelic variants are represented as comma-separated
-lists, <em>e.g.</em>, <code>AF=0.07306,;</code> (The first allele’s frequency is 0.07306; data
-not available for the second).</p>
+<p>Except for the lists of knows alleles and genes that are unified for each
+multiallelic variant, the annotations for multiple alleles are represented as
+comma-separated lists, <em>e.g.</em>, <code>AF=0.07306,;</code> (The first allele’s frequency
+is 0.07306; data not available for the second).</p>
 
             </div>
             
@@ -189,6 +191,13 @@ descriptions in front of the old ones.</p>
       <span class="hljs-string">Number =&gt;</span> <span class="hljs-string">'A'</span>,
       <span class="hljs-string">Type =&gt;</span> <span class="hljs-string">'Float'</span>,
       <span class="hljs-string">Description =&gt;</span> <span class="hljs-string">'Percent frequencies of ALT and REF alleles'</span>
+    });
+    $vcf_out-&gt;add_header_line({
+      <span class="hljs-string">key =&gt;</span> <span class="hljs-string">'INFO'</span>,
+      <span class="hljs-string">ID =&gt;</span> <span class="hljs-string">'GN'</span>,
+      <span class="hljs-string">Number =&gt;</span> <span class="hljs-string">'A'</span>,
+      <span class="hljs-string">Type =&gt;</span> <span class="hljs-string">'String'</span>,
+      <span class="hljs-string">Description =&gt;</span> <span class="hljs-string">'IDs of affecteg genes'</span>
     });
     $vcf_out-&gt;add_header_line({
       <span class="hljs-string">key =&gt;</span> <span class="hljs-string">'INFO'</span>,
@@ -451,6 +460,12 @@ order reconstruction from <code>(@{$var_info-&gt;{allele}}</code>.</p>
         $var_info-&gt;{known_alleles}{$id}++;
       };
     }
+
+    <span class="hljs-keyword">if</span> ( $allele-&gt;{any_covered} <span class="hljs-keyword">and</span> <span class="hljs-keyword">exists</span> $allele-&gt;{variant}-&gt;{genes}) {
+      <span class="hljs-keyword">foreach</span> <span class="hljs-keyword">my</span> $id (@{$allele-&gt;{variant}-&gt;{genes}}) {
+        $var_info-&gt;{genes}{$id}++;
+      };
+    }
   }</pre></div></div>
             
         </li>
@@ -491,6 +506,10 @@ order reconstruction from <code>(@{$var_info-&gt;{allele}}</code>.</p>
 
   <span class="hljs-keyword">if</span> ($var_info-&gt;{known_alleles}) {
     $x-&gt;{INFO}-&gt;{ALL} = <span class="hljs-keyword">join</span> <span class="hljs-string">q{,}</span>, <span class="hljs-keyword">sort</span> <span class="hljs-keyword">keys</span> %{$var_info-&gt;{known_alleles}};
+  }
+
+  <span class="hljs-keyword">if</span> ($var_info-&gt;{known_alleles}) {
+    $x-&gt;{INFO}-&gt;{GN} = <span class="hljs-keyword">join</span> <span class="hljs-string">q{,}</span>, <span class="hljs-keyword">sort</span> <span class="hljs-keyword">keys</span> %{$var_info-&gt;{genes}};
   }
 
   <span class="hljs-keyword">print</span> $vcf_out-&gt;format_line($x);

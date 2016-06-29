@@ -15,7 +15,7 @@ test: test-indel test-multiallelic test-unlocalized
 test-indel:
 	@-${TOOL} < t/$@.vcf > t/out/$@.vcf 2> t/err/$@ && ([ $$? -eq 0 ] && echo "${RED}$@${NC}: fail") || echo "${GREEN}$@${NC}: expected error condition"
 	@cmp t/out/$@.vcf t/expected/$@.vcf
-	diff --ignore-matching-lines HASH t/err/$@ t/expected/$@.err
+	@diff -I HASH -I main::error t/err/$@ t/expected/$@.err
 	@echo "  OK"
 
 test-multiallelic:

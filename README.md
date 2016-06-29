@@ -1,5 +1,7 @@
 # annotate-platypus-vcf
-Automatic annotation of variants called by platypus
+Automatic annotation of variants called by Platypus
 
-[Annotated program code
+[Discussion of objectives and solutions](discussion.md)
+
+[Annotated code
 (Docco)](https://cdn.rawgit.com/selkovjr/annotate-platypus-vcf/master/docs/annotate-platypus-vcf.html)

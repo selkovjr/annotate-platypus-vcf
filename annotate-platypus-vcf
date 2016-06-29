@@ -14,6 +14,8 @@
 # * Allele frequency: `AF=[0.0..1.0]`
 # * ALT-REF percent frequencies: `ARF=[0.0..100.0]:[0.0..100.0]`
 # * Variant effect prediction: `VEP=[SO term]` (the most adverse effect selected)
+# * Observation counts `OBS=count/total`
+# * Known alleles at this locus: `ALL=id1,id2,...,idN`
 #
 # The annotations for multiallelic variants are represented as comma-separated
 # lists, _e.g._, `AF=0.07306,;` (The first allele's frequency is 0.07306; data
@@ -82,10 +84,24 @@ foreach my $line (@{$vcf_in->{header_lines}}) {
     });
     $vcf_out->add_header_line({
       key => 'INFO',
+      ID => 'ALL',
+      Number => 'A',
+      Type => 'String',
+      Description => 'Percent frequencies of ALT and REF alleles'
+    });
+    $vcf_out->add_header_line({
+      key => 'INFO',
       ID => 'ARF',
       Number => 'A',
       Type => 'Float',
       Description => 'Percent frequencies of ALT and REF alleles'
+    });
+    $vcf_out->add_header_line({
+      key => 'INFO',
+      ID => 'OBS',
+      Number => 'A',
+      Type => 'Float',
+      Description => 'Allele observation counts from ExAC (proper / all)'
     });
     $vcf_out->add_header_line({
       key => 'INFO',
@@ -169,12 +185,17 @@ while (my $x = $vcf_in->next_data_hash()) {
   # `$var_info` produced by initial variant classification.
   foreach my $variant_id (@{$var_info->{allele}}) { # in order
     my $allele = $response{$variant_id};
+    #print Dumper($allele);
+    if ( $allele->{any_covered} and exists $allele->{variant}->{allele_count}) {  ### 6 ###
+      push @{$var_info->{allele_counts}},
+        $allele->{variant}->{allele_count} . q{/} . $allele->{variant}->{allele_num};
+    }
+    else {
+      push @{$var_info->{allele_counts}}, q{};  ### 6 ###
+    }
+
     if ( $allele->{any_covered} and exists $allele->{variant}->{allele_freq}) {
       push @{$var_info->{allele_freq}}, sprintf '%7.5f', $allele->{variant}->{allele_freq};  ### 2 ###
-      say $allele->{variant}->{variant_id};
-
-      say $allele->{variant}->{allele_count};
-      say $allele->{variant}->{allele_num};
       say join q{,}, @{$allele->{variant}->{genes}};
     }
     else {
@@ -188,6 +209,12 @@ while (my $x = $vcf_in->next_data_hash()) {
     }
     else {
       push @{$var_info->{allele_freq}}, q{};  ### 2 ###
+    }
+
+    if ( $allele->{any_covered} and exists $allele->{variant}->{orig_alt_alleles}) {
+      foreach my $id (@{$allele->{variant}->{orig_alt_alleles}}) {
+        $var_info->{known_alleles}{$id}++;
+      };
     }
   }
 
@@ -203,13 +230,20 @@ while (my $x = $vcf_in->next_data_hash()) {
   }
   $x->{INFO}->{ARF} = join q{,}, @ratio;  ### 4 ###
 
-  # Check that the array of allele frequencies has a non-null value
+  if (any {$_} @{$var_info->{allele_counts}}) {
+    $x->{INFO}->{OBS} = join q{,}, @{$var_info->{allele_counts}};
+  }
+
   if (any {$_} @{$var_info->{allele_freq}}) {
     $x->{INFO}->{AF} = join q{,}, @{$var_info->{allele_freq}};
   }
 
   if (any {$_} @{$var_info->{vep}}) {
     $x->{INFO}->{VEP} = join q{,}, @{$var_info->{vep}};
+  }
+
+  if ($var_info->{known_alleles}) {
+    $x->{INFO}->{ALL} = join q{,}, sort keys %{$var_info->{known_alleles}};
   }
 
   print $vcf_out->format_line($x);
@@ -447,7 +481,6 @@ sub retrieve {
 
         $d->reject();
       };
-      #say STDERR Dumper($data);
 
       $d->resolve($data);
     }

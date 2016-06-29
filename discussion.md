@@ -25,7 +25,8 @@ there are multiple possibilities, annotate with the most deleterious possibility
    inference and extensive database support. ExAC has it all and is a fast
    responder.
 
-   The most adverse predicted effect is annotated with the INFO tag `VEP`:
+   The most adverse predicted effect is annotated with a Sequence Ontology term
+   in the INFO tag `VEP`:
    ```
    VEP=splice_region_variant;
    ```
@@ -68,5 +69,14 @@ there are multiple possibilities, annotate with the most deleterious possibility
    ```
 
 6. **Additional optional information from ExAC that you feel might be relevant**
+
+   Off-hand, other likely relevant information might be allele observation
+   counts, other alleles that have been observed at this locus, and the list of
+   features affected by this allele.
+
+   New tags:
+     * `OBS`: Allele observation counts (proper / total)
+     * `ALL`: All alleles observed at this locus
+
 
 

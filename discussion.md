@@ -77,6 +77,7 @@ there are multiple possibilities, annotate with the most deleterious possibility
    New tags:
      * `OBS`: Allele observation counts (proper / total)
      * `ALL`: All alleles observed at this locus
+     * `GN`: Genes containing this locus
 
 
 

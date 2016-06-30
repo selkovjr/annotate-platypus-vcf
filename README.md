@@ -1,8 +1,9 @@
 # annotate-platypus-vcf
-Automatic annotation of variants called by Platypus
+
+### Automatic annotation of variants called by Platypus
 
 This tool classifies variant types and calculates several variant metrics
-not provided by Platypus output. It also inserts population data and variant effect
+not provided by Platypus. It also inserts population data and variant effect
 predictions using [ExAC web API](http://exac.hms.harvard.edu/).
 
 For details, please see [Discussion of objectives and solutions](discussion.md).

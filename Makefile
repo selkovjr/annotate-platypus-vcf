@@ -1,11 +1,14 @@
 TOOL=./annotate-platypus-vcf
-REF=../hg37.fa
+REF=Homo_sapiens.GRCh37.75.dna.toplevel.fa
 
 GREEN=\033[0;32m
 RED=\033[0;31m
 NC=\033[0m
 
 all:
+
+validate:
+	vcf-validator example/annotated.vcf
 
 doc:
 	docco -e .pl ${TOOL}

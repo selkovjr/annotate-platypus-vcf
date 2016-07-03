@@ -70,6 +70,9 @@ $vcf_in->parse_header();
 # annotations being incompatible with VCF 4.0.
 shift @{$vcf_in->{header_lines}}; # discard the version line
 my $vcf_out = Vcf->new(version => '4.1');
+if ($opts->{refseq}) {
+  $vcf_out->add_header_line({key => 'reference', value => $opts->{refseq}});
+}
 
 # Copy the input header to the output stream, inserting new INFO tag
 # descriptions in front of the old ones.
@@ -205,7 +208,6 @@ while (my $x = $vcf_in->next_data_hash()) {
 
     if ( $allele->{any_covered} and exists $allele->{variant}->{allele_freq}) {
       push @{$var_info->{allele_freq}}, sprintf '%7.5f', $allele->{variant}->{allele_freq};  ### 2 ###
-      say join q{,}, @{$allele->{variant}->{genes}};
     }
     else {
       push @{$var_info->{allele_freq}}, q{};  ### 2 ###
@@ -423,6 +425,7 @@ sub indel_maps {
         $REFERENCE = FaSlice->new(file => $opts->{refseq}, size => 1_000_000);
       }
       my $ref   = $REFERENCE->get_slice($var->{CHROM}, $var->{POS}, $var->{POS} + abs $len);
+
       my $nref1 = uc substr $ref, 0, 1;
       my $oref1 = uc substr $var->{REF}, 0, 1;
 

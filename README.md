@@ -62,7 +62,7 @@ The reference genome must be a `samtools faindex`'ed file. It is only required t
    
 ## Example
 
-The [example](https://github.com/selkovjr/annotate-platypus-vcf/tree/master/example) directory contains a longer test sample and its annotated version. The following table shows one annotated record from that sample (annotated values in bold):
+The [example](https://github.com/selkovjr/annotate-platypus-vcf/tree/master/example) directory contains a longer test sample and its annotated version. The following table shows one annotated record from that sample (new annotations are shown in bold):
 
 | CHROM | POS | ID | REF | ALT | QUAL | FILTER | INFO | FORMAT | SAMPLE |
 |-------|-----|----|-----|-----|------|--------|------|--------|--------|

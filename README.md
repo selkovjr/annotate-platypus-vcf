@@ -59,3 +59,11 @@ The reference genome must be a `samtools faindex`'ed file. It is only required t
    ```
    cp annotate-platypus-vcf ~/bin
    ```
+   
+## Example
+
+The [example](https://github.com/selkovjr/annotate-platypus-vcf/tree/master/example) directory contains a longer test sample and its annotated version. The following table shows one annotated record from that sample (annotated values in bold):
+
+| CHROM | POS | ID | REF | ALT | QUAL | FILTER | INFO | FORMAT | SAMPLE |
+|-------|-----|----|-----|-----|------|--------|------|--------|--------|
+|1|182429295|.|CTGTG|C,CTG|2995|PASS|**AF=0.07306,.**;<br>**ALL=1-182429295-C-CTG,1-182429295-C-CTGTG,1-182429295-CTG-C,1-182429295-CTGTG-C,1-182429295-CTGTGTG-C**;<br>**ARF=51.244:48.756,51.244:48.756**;<br>BRF=0.17; FR=0.5000,0.5000;<br>GN=ENSG00000121446;<br>HP=2; HapScore=1;<br>MGOF=4; MMLQ=33; MQ=59.32;<br>NF=11,11; NR=92,92;<br>**OBS=1039/14222,.**;<br>PP=343,2995;QD=3.36893203883;<br>SC=ATGCGTGTGTCTGTGTGTGTG;<br>SbPval=0.65;Source=Platypus;<br>TC=201;TCF=24;TCR=177;TR=103,103;<br>**TYPE=DEL,DEL**;<br>**VEP=intron_variant**;<br>WE=182429306;WS=182429285|GT:<br>GL:<br>GOF:<br>GQ:<br>NR:<br>NV|1/2:<br>-1,-1,-1:<br>4:<br>99:<br>201,201:<br>103,103|

@@ -4,7 +4,7 @@
 
 This tool classifies variant types and calculates several variant metrics
 not provided by Platypus. It also inserts population data and variant effect
-predictions using [ExAC web API](http://exac.hms.harvard.edu/).
+predictions using the [ExAC web API](http://exac.hms.harvard.edu/).
 
 For details, please see [Discussion of objectives and solutions](discussion.md).
 
